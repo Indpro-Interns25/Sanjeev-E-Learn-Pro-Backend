@@ -10,6 +10,7 @@ const lessonRoutes = require('./lessonRoutes');
 const enrollmentRoutes = require('./enrollmentRoutes');
 const progressRoutes = require('./progressRoutes');
 const authRoutes = require('./authRoutes');
+const adminRoutes = require('./adminRoutes');
 
 router.get('/', homeController.index);
 router.get('/health', healthController.health);
@@ -20,5 +21,6 @@ router.use('/lessons', lessonRoutes);
 router.use('/enrollments', enrollmentRoutes);
 router.use('/progress', progressRoutes);
 router.use('/auth', authRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;
