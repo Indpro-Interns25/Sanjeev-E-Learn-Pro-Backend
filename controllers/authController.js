@@ -3,6 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const bcrypt = require('bcrypt');
 
 exports.login = asyncHandler(async (req, res) => {
+  console.log("login attempt");
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   const user = await User.findByEmail(email);
@@ -12,3 +13,6 @@ exports.login = asyncHandler(async (req, res) => {
   // You can add JWT or session logic here
   res.json({ message: 'Login successful', user: { id: user.id, email: user.email, name: user.name, role: user.role } });
 });
+
+
+
