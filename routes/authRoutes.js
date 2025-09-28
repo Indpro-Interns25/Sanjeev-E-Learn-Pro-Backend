@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { login, register, validateToken } = require('../controllers/authController');
 
+// Handle OPTIONS requests for CORS preflight
+router.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).send();
+});
+
 // POST /api/auth/login
 router.post('/login', login);
 

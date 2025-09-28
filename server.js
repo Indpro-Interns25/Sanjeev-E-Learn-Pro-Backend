@@ -7,47 +7,68 @@ const app = express();
 // Trust proxy for proper IP forwarding
 app.set('trust proxy', true);
 
-// Enhanced CORS configuration for frontend connectivity
-const corsOptions = {
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001', 
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001',
-    'http://localhost:5173', // Vite default
-    'http://localhost:5174', // Vite alternative
-    'http://localhost:8080', // Vue CLI
-    'http://localhost:4200'  // Angular CLI
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With', 
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'Cache-Control',
-    'X-HTTP-Method-Override'
-  ],
+// Enhanced CORS configuration for frontend on port 3000
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'], // Allow frontend origins
   credentials: true,
-  maxAge: 86400 // 24 hours
-};
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  preflightContinue: false,
+  optionsSuccessStatus: 200
+}));
 
-// Apply CORS before any other middleware
-app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+// Handle preflight requests explicitly for better compatibility
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).end();
+});
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging middleware
+// Additional CORS middleware for all responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  next();
+});
+
+// Enhanced request logging middleware
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   const ip = req.ip || req.connection.remoteAddress || 'unknown';
-  console.log(`[${timestamp}] ${req.method} ${req.originalUrl} - IP: ${ip}`);
+  const origin = req.headers.origin || 'no-origin';
+  console.log(`[${timestamp}] ${req.method} ${req.originalUrl} - IP: ${ip} - Origin: ${origin}`);
+  
+  // Log request body for POST requests (except passwords)
+  if (req.method === 'POST' && req.body) {
+    const logBody = { ...req.body };
+    if (logBody.password) logBody.password = '***';
+    console.log(`[${timestamp}] Request Body:`, logBody);
+  }
+  
   next();
 });
 
@@ -62,6 +83,22 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Debug endpoint to help diagnose frontend connection issues
+app.get('/debug', (req, res) => {
+  console.log('🔍 Debug endpoint accessed from:', req.headers.origin || 'unknown origin');
+  res.status(200).json({
+    message: 'Backend is working!',
+    server: 'http://localhost:3002',
+    endpoints: {
+      register: '/auth/register',
+      login: '/auth/login',
+      profile: '/auth/me'
+    },
+    headers: req.headers,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/test', (req, res) => {
   console.log('🧪 Test endpoint accessed');
   res.status(200).json({ 
@@ -73,6 +110,40 @@ app.get('/test', (req, res) => {
 
 // Import and use routes
 const routes = require('./routes');
+const { login, register, validateToken } = require('./controllers/authController');
+
+// Add direct API routes that frontend expects
+app.post('/auth/login', login);
+app.post('/auth/register', register);
+app.get('/auth/me', validateToken, (req, res) => {
+  res.status(200).json({
+    message: 'User profile retrieved successfully',
+    user: { 
+      id: req.user.id, 
+      email: req.user.email, 
+      name: req.user.name, 
+      role: req.user.role
+    }
+  });
+});
+app.post('/auth/logout', (req, res) => {
+  res.status(200).json({
+    message: 'Logout successful'
+  });
+});
+app.post('/auth/forgot-password', (req, res) => {
+  res.status(200).json({
+    message: 'Password reset email sent (feature not implemented yet)'
+  });
+});
+
+// Additional direct routes for compatibility
+app.post('/api/login', login);
+app.post('/api/register', register);
+app.post('/login', login);
+app.post('/register', register);
+
+// Keep the existing full API routes as well
 app.use('/api', routes);
 
 // Catch-all error handler
@@ -93,7 +164,16 @@ app.use('*', (req, res) => {
     url: req.originalUrl,
     availableEndpoints: [
       'GET /health',
-      'GET /test', 
+      'GET /test',
+      'POST /auth/login',
+      'POST /auth/register',
+      'GET /auth/me',
+      'POST /auth/logout',
+      'POST /auth/forgot-password',
+      'POST /api/login',
+      'POST /api/register', 
+      'POST /login',
+      'POST /register',
       'POST /api/auth/login',
       'POST /api/auth/register'
     ]
@@ -111,11 +191,17 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`📍 Server URL: http://localhost:${PORT}`);
   console.log(`📍 Server Host: ${HOST}:${PORT}`);
   console.log(`📍 Process ID: ${process.pid}`);
-  console.log('\n🔗 API Endpoints:');
-  console.log(`   📊 Health: http://localhost:${PORT}/health`);
+  console.log('\n🔗 Frontend Expected Endpoints:');
+  console.log(`   � Login: http://localhost:${PORT}/auth/login`);
+  console.log(`   📝 Register: http://localhost:${PORT}/auth/register`);
+  console.log(`   � Profile: http://localhost:${PORT}/auth/me`);
+  console.log(`   � Logout: http://localhost:${PORT}/auth/logout`);
+  console.log(`   � Reset Password: http://localhost:${PORT}/auth/forgot-password`);
+  console.log('\n� Additional API Endpoints:');
+  console.log(`   � Health: http://localhost:${PORT}/health`);
   console.log(`   🧪 Test: http://localhost:${PORT}/test`);
-  console.log(`   🔐 Login: http://localhost:${PORT}/api/auth/login`);
-  console.log(`   📝 Register: http://localhost:${PORT}/api/auth/register`);
+  console.log(`   � Alt Login: http://localhost:${PORT}/api/login`);
+  console.log(`   � Alt Register: http://localhost:${PORT}/api/register`);
   console.log('\n🌐 Alternative URLs:');
   console.log(`   http://127.0.0.1:${PORT}`);
   console.log(`   http://localhost:${PORT}`);

@@ -40,39 +40,132 @@ exports.login = asyncHandler(async (req, res) => {
 
 // POST /api/auth/register
 exports.register = asyncHandler(async (req, res) => {
+  console.log('🔥 Registration attempt received:', {
+    body: req.body,
+    headers: req.headers,
+    method: req.method,
+    url: req.url
+  });
+  
   const { email, password, name, role } = req.body;
   
-  // Validate required fields
-  if (!email || !password || !name || !role) {
-    return res.status(400).json({ error: 'All fields are required' });
+  try {
+    // Input validation
+    if (!email || !password || !name || !role) {
+      return res.status(400).json({ 
+        error: 'All fields are required',
+        message: 'Please provide email, password, name, and role' 
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ 
+        error: 'Invalid email format',
+        message: 'Please provide a valid email address' 
+      });
+    }
+
+    // Validate password strength
+    if (password.length < 6) {
+      return res.status(400).json({ 
+        error: 'Password too short',
+        message: 'Password must be at least 6 characters long' 
+      });
+    }
+
+    // Validate role
+    const validRoles = ['student', 'instructor', 'admin'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ 
+        error: 'Invalid role',
+        message: 'Role must be student, instructor, or admin' 
+      });
+    }
+
+    // Check if email already exists
+    const existingUser = await User.findByEmail(email.toLowerCase().trim());
+    if (existingUser) {
+      return res.status(409).json({ 
+        error: 'Email already registered',
+        message: 'An account with this email already exists' 
+      });
+    }
+
+    // Hash password with bcrypt (salt rounds = 12 for better security)
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Save user to database
+    const userData = {
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      name: name.trim(),
+      role: role.toLowerCase()
+    };
+
+    const user = await User.create(userData);
+    console.log('✅ User created successfully in database:', {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    });
+
+    // Generate JWT token
+    const payload = { 
+      id: user.id, 
+      email: user.email, 
+      role: user.role 
+    };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+    // Return success response with exact format requested
+    return res.status(201).json({
+      message: 'User registered',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        created_at: user.created_at
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    
+    // Handle specific database errors
+    if (error.code === '23505') { // PostgreSQL unique constraint violation
+      return res.status(409).json({ 
+        error: 'Email already registered',
+        message: 'An account with this email already exists' 
+      });
+    }
+    
+    if (error.code === '23502') { // PostgreSQL not null violation
+      return res.status(400).json({ 
+        error: 'Missing required field',
+        message: 'All fields are required' 
+      });
+    }
+
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: error.message 
+      });
+    }
+    
+    // Generic server error
+    return res.status(500).json({ 
+      error: 'Registration failed',
+      message: 'An internal server error occurred during registration' 
+    });
   }
-
-  // Check if email already exists
-  const existingUser = await User.findByEmail(email);
-  if (existingUser) {
-    return res.status(400).json({ error: 'Email already registered' });
-  }
-
-  // Hash password
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  // Create user
-  const user = await User.create({
-    email,
-    password: hashedPassword,
-    name,
-    role
-  });
-
-  // Generate token
-  const payload = { id: user.id, email: user.email, role: user.role };
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
-  return res.status(201).json({
-    message: 'Registration successful',
-    user: { id: user.id, email: user.email, name: user.name, role: user.role },
-    token
-  });
 });
 
 // Middleware to validate JWT token
