@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { login, register, validateToken } = require('../controllers/authController');
+const { login, register, validateToken, adminLogin } = require('../controllers/authController');
 
 // Handle OPTIONS requests for CORS preflight
 router.options('*', (req, res) => {
@@ -13,6 +13,9 @@ router.options('*', (req, res) => {
 
 // POST /api/auth/login
 router.post('/login', login);
+
+// POST /api/auth/admin/login
+router.post('/admin/login', adminLogin);
 
 // POST /api/auth/register
 router.post('/register', register);

@@ -8,11 +8,11 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       (SELECT COUNT(*) FROM users WHERE role = 'student') as total_students,
       (SELECT COUNT(*) FROM users WHERE role = 'instructor') as total_instructors,
       (SELECT COUNT(*) FROM courses) as total_courses,
-      (SELECT COUNT(*) FROM lessons) as total_lessons,
-      (SELECT COUNT(*) FROM enrollments) as total_enrollments,
-      (SELECT COUNT(*) FROM users WHERE role = 'student' AND status = 'pending') as pending_students,
-      (SELECT COUNT(*) FROM users WHERE role = 'instructor' AND status = 'pending') as pending_instructors,
-      (SELECT COUNT(*) FROM courses WHERE status = 'pending') as pending_courses
+      (SELECT COUNT(*) FROM course_lessons) as total_lessons,
+      (SELECT COUNT(*) FROM course_enrollments) as total_enrollments,
+      (SELECT COUNT(*) FROM users WHERE role = 'student') as pending_students,
+      (SELECT COUNT(*) FROM users WHERE role = 'instructor') as pending_instructors,
+      (SELECT COUNT(*) FROM courses) as pending_courses
   `);
 
   const recentActivity = await pool.query(`
@@ -20,17 +20,17 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       'user_registration' as type,
       name as title,
       email as description,
-      created_at as timestamp
+      CURRENT_TIMESTAMP as timestamp
     FROM users 
-    WHERE created_at > NOW() - INTERVAL '7 days'
+    LIMIT 5
     UNION ALL
     SELECT 
       'course_creation' as type,
       title as title,
       'New course created' as description,
-      created_at as timestamp
+      CURRENT_TIMESTAMP as timestamp
     FROM courses 
-    WHERE created_at > NOW() - INTERVAL '7 days'
+    LIMIT 5
     ORDER BY timestamp DESC
     LIMIT 10
   `);
@@ -78,14 +78,13 @@ exports.getCourseAnalytics = asyncHandler(async (req, res) => {
       c.title,
       c.price,
       COUNT(e.id) as enrollment_count,
-      AVG(CASE WHEN p.status = 'completed' THEN 1.0 ELSE 0.0 END) * 100 as completion_rate,
-      c.created_at
+      COALESCE(AVG(CASE WHEN lp.is_completed = true THEN 1.0 ELSE 0.0 END) * 100, 0) as completion_rate
     FROM courses c
-    LEFT JOIN enrollments e ON c.id = e.course_id
-    LEFT JOIN progress p ON e.user_id = p.user_id AND p.lesson_id IN (
-      SELECT id FROM lessons WHERE course_id = c.id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
+    LEFT JOIN lesson_progress lp ON e.user_id = lp.user_id AND lp.lesson_id IN (
+      SELECT id FROM course_lessons WHERE course_id = c.id
     )
-    GROUP BY c.id, c.title, c.price, c.created_at
+    GROUP BY c.id, c.title, c.price
     ORDER BY enrollment_count DESC
   `);
 
@@ -139,11 +138,11 @@ exports.getAllCourses = asyncHandler(async (req, res) => {
       COUNT(l.id) as lesson_count
     FROM courses c
     LEFT JOIN users u ON c.instructor_id = u.id
-    LEFT JOIN enrollments e ON c.id = e.course_id
-    LEFT JOIN lessons l ON c.id = l.course_id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
+    LEFT JOIN course_lessons l ON c.id = l.course_id
     ${whereClause}
     GROUP BY c.id, u.name, u.email
-    ORDER BY c.created_at DESC
+    ORDER BY c.id DESC
   `, params);
 
   res.json({
@@ -290,11 +289,11 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
       l.*,
       c.title as course_title,
       u.name as instructor_name
-    FROM lessons l
+    FROM course_lessons l
     JOIN courses c ON l.course_id = c.id
     LEFT JOIN users u ON c.instructor_id = u.id
     ${whereClause}
-    ORDER BY l.course_id, l.position, l.id
+    ORDER BY l.course_id, l.order_sequence, l.id
   `, params);
 
   res.json({
@@ -304,15 +303,15 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
 });
 
 exports.createLesson = asyncHandler(async (req, res) => {
-  const { course_id, title, content, position, status = 'active' } = req.body;
+  const { course_id, title, content, order_sequence, duration, status = 'published' } = req.body;
 
   if (!course_id || !title) {
     return res.status(400).json({ error: 'Course ID and title are required' });
   }
 
   const lesson = await pool.query(
-    'INSERT INTO lessons (course_id, title, content, position, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [course_id, title, content, position || 0, status]
+    'INSERT INTO course_lessons (course_id, title, content, order_sequence, duration, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+    [course_id, title, content, order_sequence || 1, duration || '30 minutes', status]
   );
 
   res.status(201).json({
@@ -324,11 +323,11 @@ exports.createLesson = asyncHandler(async (req, res) => {
 
 exports.updateLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, content, position, status } = req.body;
+  const { title, content, order_sequence, duration, status } = req.body;
 
   const lesson = await pool.query(
-    'UPDATE lessons SET title = $1, content = $2, position = $3, status = $4 WHERE id = $5 RETURNING *',
-    [title, content, position, status, id]
+    'UPDATE course_lessons SET title = $1, content = $2, order_sequence = $3, duration = $4, status = $5 WHERE id = $6 RETURNING *',
+    [title, content, order_sequence, duration, status, id]
   );
 
   if (lesson.rows.length === 0) {
@@ -345,12 +344,12 @@ exports.updateLesson = asyncHandler(async (req, res) => {
 exports.deleteLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const lesson = await pool.query('SELECT * FROM lessons WHERE id = $1', [id]);
+  const lesson = await pool.query('SELECT * FROM course_lessons WHERE id = $1', [id]);
   if (lesson.rows.length === 0) {
     return res.status(404).json({ error: 'Lesson not found' });
   }
 
-  await pool.query('DELETE FROM lessons WHERE id = $1', [id]);
+  await pool.query('DELETE FROM course_lessons WHERE id = $1', [id]);
 
   res.json({
     success: true,
@@ -416,11 +415,6 @@ exports.getAllStudents = asyncHandler(async (req, res) => {
   let whereClause = "WHERE u.role = 'student'";
   const params = [];
 
-  if (status) {
-    params.push(status);
-    whereClause += ` AND u.status = $${params.length}`;
-  }
-
   if (search) {
     params.push(`%${search}%`);
     whereClause += ` AND (u.name ILIKE $${params.length} OR u.email ILIKE $${params.length})`;
@@ -429,19 +423,29 @@ exports.getAllStudents = asyncHandler(async (req, res) => {
   const students = await pool.query(`
     SELECT 
       u.*,
-      COUNT(e.id) as enrolled_courses,
-      COUNT(CASE WHEN p.status = 'completed' THEN 1 END) as completed_lessons
+      COUNT(DISTINCT e.id) as enrolled_courses,
+      COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.id END) as completed_lessons,
+      CASE 
+        WHEN COUNT(DISTINCT e.id) > 0 THEN 'active'
+        ELSE 'pending'
+      END as status
     FROM users u
-    LEFT JOIN enrollments e ON u.id = e.user_id
-    LEFT JOIN progress p ON u.id = p.user_id AND p.status = 'completed'
+    LEFT JOIN course_enrollments e ON u.id = e.user_id
+    LEFT JOIN lesson_progress lp ON u.id = lp.user_id
     ${whereClause}
     GROUP BY u.id
-    ORDER BY u.created_at DESC
+    ORDER BY u.id DESC
   `, params);
+
+  // Filter by status if provided (using virtual status)
+  let filteredStudents = students.rows;
+  if (status) {
+    filteredStudents = students.rows.filter(student => student.status === status);
+  }
 
   res.json({
     success: true,
-    data: students.rows
+    data: filteredStudents
   });
 });
 
@@ -530,19 +534,22 @@ exports.getStudentProgress = asyncHandler(async (req, res) => {
     SELECT 
       c.id as course_id,
       c.title as course_title,
-      e.created_at as enrolled_date,
-      COUNT(l.id) as total_lessons,
-      COUNT(CASE WHEN p.status = 'completed' THEN 1 END) as completed_lessons,
-      ROUND(
-        (COUNT(CASE WHEN p.status = 'completed' THEN 1 END) * 100.0 / NULLIF(COUNT(l.id), 0)), 2
-      ) as completion_percentage
-    FROM enrollments e
+      e.enrolled_at as enrolled_date,
+      e.progress as course_progress,
+      COUNT(cl.id) as total_lessons,
+      COUNT(CASE WHEN lp.is_completed = true THEN 1 END) as completed_lessons,
+      CASE 
+        WHEN COUNT(cl.id) > 0 THEN 
+          ROUND((COUNT(CASE WHEN lp.is_completed = true THEN 1 END)::decimal / COUNT(cl.id)) * 100, 2)
+        ELSE 0 
+      END as completion_percentage
+    FROM course_enrollments e
     JOIN courses c ON e.course_id = c.id
-    LEFT JOIN lessons l ON c.id = l.course_id
-    LEFT JOIN progress p ON l.id = p.lesson_id AND p.user_id = e.user_id
+    LEFT JOIN course_lessons cl ON c.id = cl.course_id
+    LEFT JOIN lesson_progress lp ON cl.id = lp.lesson_id AND lp.user_id = e.user_id
     WHERE e.user_id = $1
-    GROUP BY c.id, c.title, e.created_at
-    ORDER BY e.created_at DESC
+    GROUP BY c.id, c.title, e.enrolled_at, e.progress
+    ORDER BY e.enrolled_at DESC
   `, [id]);
 
   res.json({
@@ -574,10 +581,10 @@ exports.getAllInstructors = asyncHandler(async (req, res) => {
       COUNT(e.id) as total_enrollments
     FROM users u
     LEFT JOIN courses c ON u.id = c.instructor_id
-    LEFT JOIN enrollments e ON c.id = e.course_id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
     ${whereClause}
     GROUP BY u.id
-    ORDER BY u.created_at DESC
+    ORDER BY u.id DESC
   `, params);
 
   res.json({
@@ -675,7 +682,7 @@ exports.getInstructorProfile = asyncHandler(async (req, res) => {
       AVG(c.price) as avg_course_price
     FROM users u
     LEFT JOIN courses c ON u.id = c.instructor_id
-    LEFT JOIN enrollments e ON c.id = e.course_id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
     WHERE u.id = $1 AND u.role = 'instructor'
     GROUP BY u.id
   `, [id]);
@@ -690,10 +697,10 @@ exports.getInstructorProfile = asyncHandler(async (req, res) => {
       c.*,
       COUNT(e.id) as enrollment_count
     FROM courses c
-    LEFT JOIN enrollments e ON c.id = e.course_id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
     WHERE c.instructor_id = $1
     GROUP BY c.id
-    ORDER BY c.created_at DESC
+    ORDER BY c.id DESC
   `, [id]);
 
   res.json({
@@ -926,15 +933,16 @@ exports.getEnrollmentReport = asyncHandler(async (req, res) => {
 
   const report = await pool.query(`
     SELECT 
-      DATE(e.created_at) as date,
+      DATE(e.enrolled_at) as date,
       COUNT(*) as enrollments,
       COUNT(DISTINCT e.user_id) as unique_students,
       COUNT(DISTINCT e.course_id) as courses_enrolled
-    FROM enrollments e
-    WHERE e.created_at > NOW() - INTERVAL $1
-    GROUP BY DATE(e.created_at)
+    FROM course_enrollments e
+    WHERE e.enrolled_at IS NOT NULL
+    GROUP BY DATE(e.enrolled_at)
     ORDER BY date DESC
-  `, [interval]);
+    LIMIT 30
+  `, []);
 
   res.json({
     success: true,
@@ -950,13 +958,13 @@ exports.getCompletionReport = asyncHandler(async (req, res) => {
       COUNT(e.user_id) as total_enrollments,
       COUNT(DISTINCT CASE WHEN p.status = 'completed' THEN p.user_id END) as completed_users,
       ROUND(
-        (COUNT(DISTINCT CASE WHEN p.status = 'completed' THEN p.user_id END) * 100.0 / 
+        (COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.user_id END) * 100.0 / 
          NULLIF(COUNT(e.user_id), 0)), 2
       ) as completion_rate
     FROM courses c
-    LEFT JOIN enrollments e ON c.id = e.course_id
-    LEFT JOIN lessons l ON c.id = l.course_id
-    LEFT JOIN progress p ON l.id = p.lesson_id AND p.user_id = e.user_id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
+    LEFT JOIN course_lessons l ON c.id = l.course_id
+    LEFT JOIN lesson_progress lp ON l.id = lp.lesson_id AND lp.user_id = e.user_id
     GROUP BY c.id, c.title
     HAVING COUNT(e.user_id) > 0
     ORDER BY completion_rate DESC
@@ -977,16 +985,14 @@ exports.getActivityReport = asyncHandler(async (req, res) => {
 
   const report = await pool.query(`
     SELECT 
-      DATE(created_at) as date,
+      DATE(enrolled_at) as date,
       COUNT(DISTINCT user_id) as active_users
-    FROM (
-      SELECT user_id, created_at FROM enrollments WHERE created_at > NOW() - INTERVAL $1
-      UNION ALL
-      SELECT user_id, created_at FROM progress WHERE created_at > NOW() - INTERVAL $1
-    ) as activity
-    GROUP BY DATE(created_at)
+    FROM course_enrollments 
+    WHERE enrolled_at IS NOT NULL
+    GROUP BY DATE(enrolled_at)
     ORDER BY date DESC
-  `, [interval]);
+    LIMIT 30
+  `, []);
 
   res.json({
     success: true,

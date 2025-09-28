@@ -38,6 +38,50 @@ exports.login = asyncHandler(async (req, res) => {
   });
 });
 
+// POST /api/auth/admin/login
+exports.adminLogin = asyncHandler(async (req, res) => {
+  const { adminName, password } = req.body;
+
+  // Validate required fields
+  if (!adminName || !password) {
+    return res.status(400).json({ error: 'Admin name and password are required' });
+  }
+
+  // Check if it's the default admin credentials
+  const defaultAdminName = process.env.ADMIN_USERNAME || 'admin';
+  const defaultAdminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+
+  if (adminName === defaultAdminName && password === defaultAdminPassword) {
+    // Generate token for admin
+    const payload = { id: 1, email: 'admin@elearn.com', role: 'admin', adminName: adminName };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+    return res.status(200).json({
+      message: 'Admin login successful',
+      user: { id: 1, email: 'admin@elearn.com', name: adminName, role: 'admin' },
+      token
+    });
+  }
+
+  // Try to find admin user in database
+  const adminUser = await User.findByEmail(adminName + '@admin.com');
+  if (adminUser && adminUser.role === 'admin') {
+    const isPasswordValid = await bcrypt.compare(password, adminUser.password);
+    if (isPasswordValid) {
+      const payload = { id: adminUser.id, email: adminUser.email, role: adminUser.role };
+      const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+      return res.status(200).json({
+        message: 'Admin login successful',
+        user: { id: adminUser.id, email: adminUser.email, name: adminUser.name, role: adminUser.role },
+        token
+      });
+    }
+  }
+
+  return res.status(401).json({ error: 'Invalid admin credentials' });
+});
+
 // POST /api/auth/register
 exports.register = asyncHandler(async (req, res) => {
   console.log('🔥 Registration attempt received:', {

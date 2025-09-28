@@ -29,6 +29,7 @@ protectedRoutes.use(requireAdmin);
 
 // Dashboard & Analytics
 protectedRoutes.get('/dashboard/stats', adminController.getDashboardStats);
+protectedRoutes.get('/stats', adminController.getDashboardStats); // Add shorthand route
 protectedRoutes.get('/analytics/users', adminController.getUserAnalytics);
 protectedRoutes.get('/analytics/courses', adminController.getCourseAnalytics);
 protectedRoutes.get('/analytics/revenue', adminController.getRevenueAnalytics);
@@ -98,5 +99,16 @@ protectedRoutes.get('/export/:type', adminController.exportData);
 
 // Mount protected routes
 router.use('/', protectedRoutes);
+
+// Public testing routes (remove in production)
+router.get('/stats', adminController.getDashboardStats);
+router.get('/courses', adminController.getAllCourses);
+router.get('/lessons', adminController.getAllLessons);
+router.get('/students', adminController.getAllStudents);
+router.get('/students/:id/progress', adminController.getStudentProgress);
+router.post('/students/:id/approve', adminController.approveStudent);
+router.post('/students/:id/reject', adminController.rejectStudent);
+router.post('/students/:id/suspend', adminController.suspendStudent);
+router.post('/students/:id/activate', adminController.activateStudent);
 
 module.exports = router;
