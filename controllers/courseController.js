@@ -2,7 +2,43 @@ const Course = require('../models/courseModel');
 const asyncHandler = require('../utils/asyncHandler');
 
 exports.list = asyncHandler(async (req, res) => {
-  const courses = await Course.findAll();
+  const { featured, sortBy, sortOrder, limit } = req.query;
+  
+  let query = 'SELECT * FROM courses';
+  const queryParams = [];
+  const conditions = [];
+  
+  // Handle featured filter
+  if (featured === 'true') {
+    conditions.push('is_featured = $' + (queryParams.length + 1));
+    queryParams.push(true);
+  }
+  
+  // Add WHERE clause if there are conditions
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+  
+  // Handle sorting
+  if (sortBy) {
+    const validSortFields = ['rating', 'created_at', 'title', 'enrolled_count'];
+    const validSortOrders = ['asc', 'desc'];
+    
+    if (validSortFields.includes(sortBy)) {
+      const order = validSortOrders.includes(sortOrder?.toLowerCase()) ? sortOrder.toUpperCase() : 'ASC';
+      query += ` ORDER BY ${sortBy} ${order}`;
+    }
+  } else {
+    query += ' ORDER BY id';
+  }
+  
+  // Handle limit
+  if (limit && !isNaN(parseInt(limit))) {
+    query += ' LIMIT $' + (queryParams.length + 1);
+    queryParams.push(parseInt(limit));
+  }
+  
+  const courses = await Course.findAllWithQuery(query, queryParams);
   res.json(courses);
 });
 
@@ -17,6 +53,17 @@ exports.create = asyncHandler(async (req, res) => {
   if (!title) return res.status(400).json({ error: 'title required' });
   const created = await Course.create({ title, description });
   res.status(201).json(created);
+});
+
+exports.update = asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { title, description } = req.body;
+  
+  const existing = await Course.findById(id);
+  if (!existing) return res.status(404).json({ error: 'Course not found' });
+  
+  const updated = await Course.update(id, { title, description });
+  res.json(updated);
 });
 
 exports.remove = asyncHandler(async (req, res) => {

@@ -36,6 +36,7 @@ app.get('/test', (req, res) => {
 
 // Routes
 const routes = require('./routes');
+const authRoutes = require('./routes/authRoutes');
 
 // Root route - Welcome message
 app.get('/', (req, res) => {
@@ -45,7 +46,8 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       api: '/api',
-      auth: '/api/auth',
+      auth: '/auth',
+      dashboard: '/api/dashboard',
       users: '/api/users',
       courses: '/api/courses'
     },
@@ -57,6 +59,9 @@ app.get('/', (req, res) => {
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end(); // No content for favicon
 });
+
+// Add direct auth routes (what frontend expects)
+app.use('/auth', authRoutes);
 
 app.use('/api', routes);
 
@@ -82,7 +87,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start the server if not already started
-const PORT = 3003; // Use a different port to avoid conflicts
+const PORT = 3002; // Use port 3002 as requested
 const HOST = '127.0.0.1'; // Use IPv4 explicitly
 
 const server = app.listen(PORT, HOST, () => {
