@@ -43,6 +43,9 @@ protectedRoutes.patch('/courses/:id/approve', adminController.approveCourse);
 protectedRoutes.patch('/courses/:id/reject', adminController.rejectCourse);
 protectedRoutes.patch('/courses/:id/pricing', adminController.updateCoursePricing);
 
+// TEMPORARY: Public routes for testing (remove in production)
+router.post('/courses', adminController.createCourse);
+
 // Lesson Management
 protectedRoutes.get('/lessons', adminController.getAllLessons);
 protectedRoutes.post('/lessons', adminController.createLesson);

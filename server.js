@@ -55,6 +55,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// URL cleaning middleware - remove trailing spaces and normalize URLs
+app.use((req, res, next) => {
+  // Decode the URL and remove trailing whitespace
+  const cleanUrl = decodeURIComponent(req.url).trim();
+  
+  // If the URL was cleaned (had trailing spaces), redirect to clean URL
+  if (cleanUrl !== decodeURIComponent(req.url)) {
+    console.log(`🧹 Cleaning URL: "${req.url}" -> "${encodeURI(cleanUrl)}"`);
+    req.url = encodeURI(cleanUrl);
+    req.originalUrl = encodeURI(cleanUrl);
+  }
+  
+  next();
+});
+
 // Enhanced request logging middleware
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();

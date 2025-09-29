@@ -16,21 +16,21 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
   `);
 
   const recentActivity = await pool.query(`
-    SELECT 
+    (SELECT 
       'user_registration' as type,
       name as title,
       email as description,
       CURRENT_TIMESTAMP as timestamp
     FROM users 
-    LIMIT 5
+    LIMIT 5)
     UNION ALL
-    SELECT 
+    (SELECT 
       'course_creation' as type,
       title as title,
       'New course created' as description,
       CURRENT_TIMESTAMP as timestamp
     FROM courses 
-    LIMIT 5
+    LIMIT 5)
     ORDER BY timestamp DESC
     LIMIT 10
   `);
@@ -152,15 +152,71 @@ exports.getAllCourses = asyncHandler(async (req, res) => {
 });
 
 exports.createCourse = asyncHandler(async (req, res) => {
-  const { title, description, category, price, status = 'active', instructor_id } = req.body;
+  const { 
+    title, 
+    description, 
+    category, 
+    level,
+    price, 
+    duration,
+    status = 'published', 
+    instructor_id,
+    thumbnail,
+    preview_video
+  } = req.body;
 
   if (!title || !description) {
     return res.status(400).json({ error: 'Title and description are required' });
   }
 
+  // Validate and normalize level
+  const validLevels = ['beginner', 'intermediate', 'advanced'];
+  const normalizedLevel = level ? level.toLowerCase() : 'beginner';
+  if (!validLevels.includes(normalizedLevel)) {
+    return res.status(400).json({ 
+      error: 'Invalid level', 
+      message: 'Level must be one of: beginner, intermediate, advanced' 
+    });
+  }
+
+  // Validate and normalize status
+  const validStatuses = ['draft', 'published', 'archived'];
+  const normalizedStatus = status ? status.toLowerCase() : 'published';
+  if (!validStatuses.includes(normalizedStatus)) {
+    return res.status(400).json({ 
+      error: 'Invalid status', 
+      message: 'Status must be one of: draft, published, archived' 
+    });
+  }
+
+  // Set default values for required fields
+  const courseData = {
+    title,
+    description: description || 'No description provided',
+    instructor_id: instructor_id || 1,
+    category: category || 'General',
+    level: normalizedLevel,
+    price: price || 0,
+    duration: duration || '4 weeks',
+    status: normalizedStatus,
+    thumbnail: thumbnail || null,
+    preview_video: preview_video || null
+  };
+
   const course = await pool.query(
-    'INSERT INTO courses (title, description, category, price, status, instructor_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-    [title, description, category, price || 0, status, instructor_id]
+    'INSERT INTO courses (title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+    [
+      courseData.title,
+      courseData.description,
+      courseData.instructor_id,
+      courseData.category,
+      courseData.level,
+      courseData.price,
+      courseData.duration,
+      courseData.status,
+      courseData.thumbnail,
+      courseData.preview_video
+    ]
   );
 
   res.status(201).json({

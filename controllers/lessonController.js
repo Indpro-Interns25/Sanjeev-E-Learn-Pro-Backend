@@ -2,6 +2,27 @@ const Lesson = require('../models/lessonModel');
 const Course = require('../models/courseModel');
 const asyncHandler = require('../utils/asyncHandler');
 
+// Get all lessons (for general API access)
+exports.getAllLessons = asyncHandler(async (req, res) => {
+  const pool = require('../db');
+  
+  const lessons = await pool.query(`
+    SELECT 
+      l.*,
+      c.title as course_title,
+      u.name as instructor_name
+    FROM course_lessons l
+    JOIN courses c ON l.course_id = c.id
+    LEFT JOIN users u ON c.instructor_id = u.id
+    ORDER BY l.course_id, l.order_sequence, l.id
+  `);
+
+  res.json({
+    success: true,
+    data: lessons.rows
+  });
+});
+
 exports.listByCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
   const lessons = await Lesson.findByCourse(courseId);

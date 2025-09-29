@@ -1,10 +1,23 @@
 const pool = require('../db');
 
 class CourseModel {
-  static async create({ title, description }) {
+  static async create(courseData) {
+    const { 
+      title, 
+      description, 
+      instructor_id, 
+      category, 
+      level, 
+      price, 
+      duration, 
+      status, 
+      thumbnail, 
+      preview_video 
+    } = courseData;
+    
     const { rows } = await pool.query(
-      'INSERT INTO courses (title, description) VALUES ($1, $2) RETURNING *',
-      [title, description]
+      'INSERT INTO courses (title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+      [title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video]
     );
     return rows[0];
   }

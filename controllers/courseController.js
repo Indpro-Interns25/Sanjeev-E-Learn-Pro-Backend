@@ -49,9 +49,56 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { title, description } = req.body;
+  const { 
+    title, 
+    description, 
+    category,
+    level,
+    price,
+    duration,
+    instructor_id,
+    thumbnail,
+    preview_video,
+    status = 'published'
+  } = req.body;
+  
   if (!title) return res.status(400).json({ error: 'title required' });
-  const created = await Course.create({ title, description });
+  
+  // Validate and normalize level
+  const validLevels = ['beginner', 'intermediate', 'advanced'];
+  const normalizedLevel = level ? level.toLowerCase() : 'beginner';
+  if (!validLevels.includes(normalizedLevel)) {
+    return res.status(400).json({ 
+      error: 'Invalid level', 
+      message: 'Level must be one of: beginner, intermediate, advanced' 
+    });
+  }
+
+  // Validate and normalize status
+  const validStatuses = ['draft', 'published', 'archived'];
+  const normalizedStatus = status ? status.toLowerCase() : 'published';
+  if (!validStatuses.includes(normalizedStatus)) {
+    return res.status(400).json({ 
+      error: 'Invalid status', 
+      message: 'Status must be one of: draft, published, archived' 
+    });
+  }
+  
+  // Set default values for required fields
+  const courseData = {
+    title,
+    description: description || 'No description provided',
+    instructor_id: instructor_id || 1,
+    category: category || 'General',
+    level: normalizedLevel,
+    price: price || 0,
+    duration: duration || '4 weeks',
+    status: normalizedStatus,
+    thumbnail: thumbnail || null,
+    preview_video: preview_video || null
+  };
+
+  const created = await Course.create(courseData);
   res.status(201).json(created);
 });
 
