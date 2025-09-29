@@ -20,16 +20,18 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       'user_registration' as type,
       name as title,
       email as description,
-      CURRENT_TIMESTAMP as timestamp
+      created_at as timestamp
     FROM users 
+    ORDER BY created_at DESC
     LIMIT 5)
     UNION ALL
     (SELECT 
       'course_creation' as type,
       title as title,
       'New course created' as description,
-      CURRENT_TIMESTAMP as timestamp
+      created_at as timestamp
     FROM courses 
+    ORDER BY created_at DESC
     LIMIT 5)
     ORDER BY timestamp DESC
     LIMIT 10
