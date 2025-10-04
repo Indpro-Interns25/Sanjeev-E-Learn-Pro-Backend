@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { login, register, validateToken, adminLogin } = require('../controllers/authController');
+const pool = require('../db');
 
 // Handle OPTIONS requests for CORS preflight
 router.options('*', (req, res) => {
@@ -9,6 +10,40 @@ router.options('*', (req, res) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.status(200).send();
+});
+
+// GET /auth/users - Get all users (public for testing)
+router.get('/users', async (req, res) => {
+  try {
+    console.log('📋 Getting all users...');
+    
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        name, 
+        email, 
+        role, 
+        created_at, 
+        updated_at 
+      FROM users 
+      ORDER BY created_at DESC
+    `);
+    
+    console.log(`✅ Found ${result.rows.length} users`);
+    
+    res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('❌ Error fetching users:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users',
+      message: error.message
+    });
+  }
 });
 
 // POST /api/auth/login

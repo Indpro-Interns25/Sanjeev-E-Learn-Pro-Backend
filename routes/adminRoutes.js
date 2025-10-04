@@ -22,6 +22,24 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
+// Public testing routes (remove in production) - MOVED TO TOP
+router.get('/stats', adminController.getDashboardStats);
+router.get('/courses', adminController.getAllCourses);
+router.get('/courses/:id', adminController.getCourseById);
+router.get('/lessons', adminController.getAllLessons);
+router.get('/students', adminController.getAllStudents);
+router.get('/students/:id/progress', adminController.getStudentProgress);
+router.get('/instructors', adminController.getAllInstructors);
+router.post('/instructors', adminController.createInstructor);
+router.get('/instructors/:id/profile', adminController.getInstructorProfile);
+router.post('/courses', adminController.createCourse);
+router.put('/courses/:id', adminController.updateCourse);
+router.delete('/courses/:id', adminController.deleteCourse);
+router.post('/students/:id/approve', adminController.approveStudent);
+router.post('/students/:id/reject', adminController.rejectStudent);
+router.post('/students/:id/suspend', adminController.suspendStudent);
+router.post('/students/:id/activate', adminController.activateStudent);
+
 // Apply authentication and admin check to protected routes only
 const protectedRoutes = express.Router();
 protectedRoutes.use(validateToken);
@@ -68,6 +86,7 @@ protectedRoutes.get('/students/:id/progress', adminController.getStudentProgress
 
 // Instructor Management
 protectedRoutes.get('/instructors', adminController.getAllInstructors);
+protectedRoutes.post('/instructors', adminController.createInstructor);
 protectedRoutes.patch('/instructors/:id/approve', adminController.approveInstructor);
 protectedRoutes.patch('/instructors/:id/reject', adminController.rejectInstructor);
 protectedRoutes.patch('/instructors/:id/suspend', adminController.suspendInstructor);
@@ -105,17 +124,6 @@ protectedRoutes.post('/bulk/reject-users', adminController.bulkRejectUsers);
 protectedRoutes.get('/export/:type', adminController.exportData);
 
 // Mount protected routes
-router.use('/', protectedRoutes);
-
-// Public testing routes (remove in production)
-router.get('/stats', adminController.getDashboardStats);
-router.get('/courses', adminController.getAllCourses);
-router.get('/lessons', adminController.getAllLessons);
-router.get('/students', adminController.getAllStudents);
-router.get('/students/:id/progress', adminController.getStudentProgress);
-router.post('/students/:id/approve', adminController.approveStudent);
-router.post('/students/:id/reject', adminController.rejectStudent);
-router.post('/students/:id/suspend', adminController.suspendStudent);
-router.post('/students/:id/activate', adminController.activateStudent);
+router.use('/protected', protectedRoutes);
 
 module.exports = router;

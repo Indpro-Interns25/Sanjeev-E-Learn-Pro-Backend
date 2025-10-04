@@ -20,18 +20,18 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       'user_registration' as type,
       name as title,
       email as description,
-      created_at as timestamp
+      CURRENT_TIMESTAMP as timestamp
     FROM users 
-    ORDER BY created_at DESC
+    ORDER BY id DESC
     LIMIT 5)
     UNION ALL
     (SELECT 
       'course_creation' as type,
       title as title,
       'New course created' as description,
-      created_at as timestamp
+      CURRENT_TIMESTAMP as timestamp
     FROM courses 
-    ORDER BY created_at DESC
+    ORDER BY id DESC
     LIMIT 5)
     ORDER BY timestamp DESC
     LIMIT 10
@@ -153,6 +153,50 @@ exports.getAllCourses = asyncHandler(async (req, res) => {
   });
 });
 
+exports.getCourseById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Validate ID parameter
+  const courseId = parseInt(id);
+  if (isNaN(courseId) || courseId <= 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid course ID. Please provide a valid numeric ID.' 
+    });
+  }
+
+  console.log(`🔍 Getting course by ID: ${courseId}`);
+
+  const course = await pool.query(`
+    SELECT 
+      c.*,
+      u.name as instructor_name,
+      u.email as instructor_email,
+      COUNT(e.id) as enrollment_count,
+      COUNT(l.id) as lesson_count
+    FROM courses c
+    LEFT JOIN users u ON c.instructor_id = u.id
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
+    LEFT JOIN course_lessons l ON c.id = l.course_id
+    WHERE c.id = $1
+    GROUP BY c.id, u.name, u.email
+  `, [courseId]);
+
+  if (course.rows.length === 0) {
+    console.log(`❌ Course not found with ID: ${courseId}`);
+    return res.status(404).json({ 
+      success: false,
+      error: `Course with ID ${courseId} not found` 
+    });
+  }
+
+  console.log(`✅ Course found: ${course.rows[0].title}`);
+  res.json({
+    success: true,
+    data: course.rows[0]
+  });
+});
+
 exports.createCourse = asyncHandler(async (req, res) => {
   const { 
     title, 
@@ -232,15 +276,32 @@ exports.updateCourse = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { title, description, category, price, status } = req.body;
 
+  // Validate ID parameter
+  const courseId = parseInt(id);
+  if (isNaN(courseId) || courseId <= 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid course ID. Please provide a valid numeric ID.' 
+    });
+  }
+
+  console.log(`🔄 Updating course ID: ${courseId}`);
+  console.log('📝 Update data:', { title, description, category, price, status });
+
   const course = await pool.query(
     'UPDATE courses SET title = $1, description = $2, category = $3, price = $4, status = $5 WHERE id = $6 RETURNING *',
-    [title, description, category, price, status, id]
+    [title, description, category, price, status, courseId]
   );
 
   if (course.rows.length === 0) {
-    return res.status(404).json({ error: 'Course not found' });
+    console.log(`❌ Course not found for update with ID: ${courseId}`);
+    return res.status(404).json({ 
+      success: false,
+      error: `Course with ID ${courseId} not found` 
+    });
   }
 
+  console.log(`✅ Course updated successfully: ${course.rows[0].title}`);
   res.json({
     success: true,
     data: course.rows[0],
@@ -251,14 +312,30 @@ exports.updateCourse = asyncHandler(async (req, res) => {
 exports.deleteCourse = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  // Check if course exists
-  const course = await pool.query('SELECT * FROM courses WHERE id = $1', [id]);
-  if (course.rows.length === 0) {
-    return res.status(404).json({ error: 'Course not found' });
+  // Validate ID parameter
+  const courseId = parseInt(id);
+  if (isNaN(courseId) || courseId <= 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid course ID. Please provide a valid numeric ID.' 
+    });
   }
 
-  await pool.query('DELETE FROM courses WHERE id = $1', [id]);
+  console.log(`🗑️ Deleting course ID: ${courseId}`);
 
+  // Check if course exists
+  const course = await pool.query('SELECT * FROM courses WHERE id = $1', [courseId]);
+  if (course.rows.length === 0) {
+    console.log(`❌ Course not found for deletion with ID: ${courseId}`);
+    return res.status(404).json({ 
+      success: false,
+      error: `Course with ID ${courseId} not found` 
+    });
+  }
+
+  await pool.query('DELETE FROM courses WHERE id = $1', [courseId]);
+
+  console.log(`✅ Course deleted successfully: ${course.rows[0].title}`);
   res.json({
     success: true,
     message: 'Course deleted successfully'
@@ -649,6 +726,74 @@ exports.getAllInstructors = asyncHandler(async (req, res) => {
     success: true,
     data: instructors.rows
   });
+});
+
+exports.createInstructor = asyncHandler(async (req, res) => {
+  const { name, email, password, status = 'pending' } = req.body;
+
+  // Validate required fields
+  if (!name || !email || !password) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Name, email, and password are required' 
+    });
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid email format' 
+    });
+  }
+
+  try {
+    // Check if email already exists
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({ 
+        success: false,
+        error: 'Email already exists' 
+      });
+    }
+
+    // Hash password
+    const bcrypt = require('bcrypt');
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Insert new instructor (only using existing columns)
+    const newInstructor = await pool.query(`
+      INSERT INTO users (name, email, password, role)
+      VALUES ($1, $2, $3, 'instructor')
+      RETURNING id, name, email, role
+    `, [name, email, hashedPassword]);
+
+    console.log(`✅ Instructor created successfully: ${name} (${email})`);
+
+    res.status(201).json({
+      success: true,
+      data: newInstructor.rows[0],
+      message: 'Instructor created successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating instructor:', error.message);
+    
+    if (error.code === '23505') { // PostgreSQL unique violation error
+      return res.status(409).json({ 
+        success: false,
+        error: 'Email already exists' 
+      });
+    }
+
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to create instructor',
+      message: error.message 
+    });
+  }
 });
 
 exports.approveInstructor = asyncHandler(async (req, res) => {
