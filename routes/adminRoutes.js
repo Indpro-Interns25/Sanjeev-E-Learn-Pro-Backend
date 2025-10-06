@@ -63,6 +63,7 @@ protectedRoutes.get('/students/:id/progress', adminController.getStudentProgress
 
 // Instructor Management
 protectedRoutes.get('/instructors', adminController.getAllInstructors);
+protectedRoutes.post('/instructors', adminController.createInstructor);
 protectedRoutes.patch('/instructors/:id/approve', adminController.approveInstructor);
 protectedRoutes.patch('/instructors/:id/reject', adminController.rejectInstructor);
 protectedRoutes.patch('/instructors/:id/suspend', adminController.suspendInstructor);
