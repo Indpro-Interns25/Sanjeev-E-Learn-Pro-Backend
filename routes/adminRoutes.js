@@ -22,24 +22,6 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
-// Public testing routes (remove in production) - MOVED TO TOP
-router.get('/stats', adminController.getDashboardStats);
-router.get('/courses', adminController.getAllCourses);
-router.get('/courses/:id', adminController.getCourseById);
-router.get('/lessons', adminController.getAllLessons);
-router.get('/students', adminController.getAllStudents);
-router.get('/students/:id/progress', adminController.getStudentProgress);
-router.get('/instructors', adminController.getAllInstructors);
-router.post('/instructors', adminController.createInstructor);
-router.get('/instructors/:id/profile', adminController.getInstructorProfile);
-router.post('/courses', adminController.createCourse);
-router.put('/courses/:id', adminController.updateCourse);
-router.delete('/courses/:id', adminController.deleteCourse);
-router.post('/students/:id/approve', adminController.approveStudent);
-router.post('/students/:id/reject', adminController.rejectStudent);
-router.post('/students/:id/suspend', adminController.suspendStudent);
-router.post('/students/:id/activate', adminController.activateStudent);
-
 // Apply authentication and admin check to protected routes only
 const protectedRoutes = express.Router();
 protectedRoutes.use(validateToken);
@@ -61,12 +43,7 @@ protectedRoutes.patch('/courses/:id/approve', adminController.approveCourse);
 protectedRoutes.patch('/courses/:id/reject', adminController.rejectCourse);
 protectedRoutes.patch('/courses/:id/pricing', adminController.updateCoursePricing);
 
-// TEMPORARY: Public routes for testing (remove in production)
-router.post('/courses', adminController.createCourse);
-router.get('/students', adminController.getAllStudents);
-router.get('/students/:id/progress', adminController.getStudentProgress);
-router.get('/instructors', adminController.getAllInstructors);
-router.get('/instructors/:id/profile', adminController.getInstructorProfile);
+// Note: Removed unprotected test routes to enforce authentication and admin checks.
 
 // Lesson Management
 protectedRoutes.get('/lessons', adminController.getAllLessons);
@@ -86,7 +63,6 @@ protectedRoutes.get('/students/:id/progress', adminController.getStudentProgress
 
 // Instructor Management
 protectedRoutes.get('/instructors', adminController.getAllInstructors);
-protectedRoutes.post('/instructors', adminController.createInstructor);
 protectedRoutes.patch('/instructors/:id/approve', adminController.approveInstructor);
 protectedRoutes.patch('/instructors/:id/reject', adminController.rejectInstructor);
 protectedRoutes.patch('/instructors/:id/suspend', adminController.suspendInstructor);
@@ -124,6 +100,8 @@ protectedRoutes.post('/bulk/reject-users', adminController.bulkRejectUsers);
 protectedRoutes.get('/export/:type', adminController.exportData);
 
 // Mount protected routes
-router.use('/protected', protectedRoutes);
+router.use('/', protectedRoutes);
+
+// Public testing routes removed. All admin actions should go through the protected routes above.
 
 module.exports = router;

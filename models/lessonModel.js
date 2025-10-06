@@ -17,8 +17,9 @@ class LessonModel {
     return rows;
   }
   static async update(id, { title, content, position }) {
+    // Use COALESCE so that omitted fields don't overwrite existing values with NULL
     const { rows } = await pool.query(
-      'UPDATE course_lessons SET title = $1, content = $2, order_sequence = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+      'UPDATE course_lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_sequence = COALESCE($3, order_sequence), updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
       [title, content, position, id]
     );
     return rows[0];

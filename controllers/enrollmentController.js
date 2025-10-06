@@ -15,6 +15,11 @@ exports.listUser = asyncHandler(async (req, res) => {
   res.json(rows);
 });
 
+exports.listAll = asyncHandler(async (req, res) => {
+  const rows = await Enrollment.listAll();
+  res.json({ success: true, data: rows });
+});
+
 exports.listCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
   const rows = await Enrollment.listByCourse(courseId);

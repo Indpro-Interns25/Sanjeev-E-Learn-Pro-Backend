@@ -3,7 +3,7 @@ const pool = require('../db');
 class UserModel {
   static async create({ email, name, password, role }) {
     const { rows } = await pool.query(
-      'INSERT INTO users (email, name, password, role) VALUES ($1, $2, $3, $4) RETURNING *',
+      'INSERT INTO users (email, name, password, role, created_at) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP) RETURNING *',
       [email, name, password, role]
     );
     return rows[0];
@@ -13,7 +13,7 @@ class UserModel {
     return rows[0] || null;
   }
   static async findAll() {
-    const { rows } = await pool.query('SELECT * FROM users ORDER BY id');
+    const { rows } = await pool.query('SELECT * FROM users ORDER BY created_at DESC');
     return rows;
   }
   static async findByEmail(email) {

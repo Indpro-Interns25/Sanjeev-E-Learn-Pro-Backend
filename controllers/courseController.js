@@ -104,13 +104,73 @@ exports.create = asyncHandler(async (req, res) => {
 
 exports.update = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { title, description } = req.body;
+  const { 
+    title, 
+    description, 
+    category, 
+    level, 
+    price, 
+    duration, 
+    status, 
+    instructor_id, 
+    thumbnail, 
+    preview_video,
+    is_featured 
+  } = req.body;
   
   const existing = await Course.findById(id);
   if (!existing) return res.status(404).json({ error: 'Course not found' });
   
-  const updated = await Course.update(id, { title, description });
-  res.json(updated);
+  // Validate level if provided
+  if (level) {
+    const validLevels = ['beginner', 'intermediate', 'advanced'];
+    const normalizedLevel = level.toLowerCase();
+    if (!validLevels.includes(normalizedLevel)) {
+      return res.status(400).json({ 
+        error: 'Invalid level', 
+        message: 'Level must be one of: beginner, intermediate, advanced' 
+      });
+    }
+  }
+
+  // Validate status if provided
+  if (status) {
+    const validStatuses = ['draft', 'published', 'archived'];
+    const normalizedStatus = status.toLowerCase();
+    if (!validStatuses.includes(normalizedStatus)) {
+      return res.status(400).json({ 
+        error: 'Invalid status', 
+        message: 'Status must be one of: draft, published, archived' 
+      });
+    }
+  }
+
+  // Use direct database query to handle all fields with COALESCE
+  const pool = require('../db');
+  const updated = await pool.query(`
+    UPDATE courses SET 
+      title = COALESCE($1, title),
+      description = COALESCE($2, description),
+      category = COALESCE($3, category),
+      level = COALESCE($4, level),
+      price = COALESCE($5, price),
+      duration = COALESCE($6, duration),
+      status = COALESCE($7, status),
+      instructor_id = COALESCE($8, instructor_id),
+      thumbnail = COALESCE($9, thumbnail),
+      preview_video = COALESCE($10, preview_video),
+      is_featured = COALESCE($11, is_featured),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $12 
+    RETURNING *`,
+    [title, description, category, level, price, duration, status, instructor_id, thumbnail, preview_video, is_featured, id]
+  );
+
+  if (updated.rows.length === 0) {
+    return res.status(404).json({ error: 'Course not found' });
+  }
+
+  res.json(updated.rows[0]);
 });
 
 exports.remove = asyncHandler(async (req, res) => {

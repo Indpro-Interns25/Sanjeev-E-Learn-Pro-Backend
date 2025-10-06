@@ -1,5 +1,6 @@
 const pool = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
+const { formatDurationForDB, formatDurationForForm } = require('../utils/durationHelper');
 
 // Dashboard Statistics
 exports.getDashboardStats = asyncHandler(async (req, res) => {
@@ -274,7 +275,19 @@ exports.createCourse = asyncHandler(async (req, res) => {
 
 exports.updateCourse = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, description, category, price, status } = req.body;
+  const { 
+    title, 
+    description, 
+    category, 
+    level, 
+    price, 
+    duration, 
+    status, 
+    instructor_id, 
+    thumbnail, 
+    preview_video, 
+    is_featured 
+  } = req.body;
 
   // Validate ID parameter
   const courseId = parseInt(id);
@@ -285,13 +298,69 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     });
   }
 
-  console.log(`🔄 Updating course ID: ${courseId}`);
-  console.log('📝 Update data:', { title, description, category, price, status });
+  // Build dynamic update query based on provided fields
+  const updates = [];
+  const values = [];
+  let paramCount = 1;
 
-  const course = await pool.query(
-    'UPDATE courses SET title = $1, description = $2, category = $3, price = $4, status = $5 WHERE id = $6 RETURNING *',
-    [title, description, category, price, status, courseId]
-  );
+  if (title !== undefined) {
+    updates.push(`title = $${paramCount++}`);
+    values.push(title);
+  }
+  if (description !== undefined) {
+    updates.push(`description = $${paramCount++}`);
+    values.push(description);
+  }
+  if (category !== undefined) {
+    updates.push(`category = $${paramCount++}`);
+    values.push(category);
+  }
+  if (level !== undefined) {
+    updates.push(`level = $${paramCount++}`);
+    values.push(level);
+  }
+  if (price !== undefined) {
+    updates.push(`price = $${paramCount++}`);
+    values.push(price);
+  }
+  if (duration !== undefined) {
+    updates.push(`duration = $${paramCount++}`);
+    values.push(duration);
+  }
+  if (status !== undefined) {
+    updates.push(`status = $${paramCount++}`);
+    values.push(status);
+  }
+  if (instructor_id !== undefined) {
+    updates.push(`instructor_id = $${paramCount++}`);
+    values.push(instructor_id);
+  }
+  if (thumbnail !== undefined) {
+    updates.push(`thumbnail = $${paramCount++}`);
+    values.push(thumbnail);
+  }
+  if (preview_video !== undefined) {
+    updates.push(`preview_video = $${paramCount++}`);
+    values.push(preview_video);
+  }
+  if (is_featured !== undefined) {
+    updates.push(`is_featured = $${paramCount++}`);
+    values.push(is_featured);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'No fields provided for update'
+    });
+  }
+
+  // Always update the updated_at timestamp
+  updates.push(`updated_at = CURRENT_TIMESTAMP`);
+  values.push(courseId);
+
+  const query = `UPDATE courses SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+  const course = await pool.query(query, values);
 
   if (course.rows.length === 0) {
     console.log(`❌ Course not found for update with ID: ${courseId}`);
@@ -431,47 +500,80 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
     ORDER BY l.course_id, l.order_sequence, l.id
   `, params);
 
+  // Format durations for frontend display
+  const formattedLessons = lessons.rows.map(lesson => ({
+    ...lesson,
+    duration_number: formatDurationForForm(lesson.duration), // Add numeric duration for forms
+    duration_display: lesson.duration // Keep original for display
+  }));
+
   res.json({
     success: true,
-    data: lessons.rows
+    data: formattedLessons
   });
 });
 
 exports.createLesson = asyncHandler(async (req, res) => {
-  const { course_id, title, content, order_sequence, duration, status = 'published' } = req.body;
+  const { course_id, title, content, order_sequence, duration, video_url, description } = req.body;
 
   if (!course_id || !title) {
     return res.status(400).json({ error: 'Course ID and title are required' });
   }
 
+  // Map description to content if content is not provided
+  const finalContent = content || description || '';
+
+  // Normalize duration to consistent format
+  const normalizedDuration = formatDurationForDB(duration) || '30 minutes';
+
   const lesson = await pool.query(
-    'INSERT INTO course_lessons (course_id, title, content, order_sequence, duration, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-    [course_id, title, content, order_sequence || 1, duration || '30 minutes', status]
+    'INSERT INTO course_lessons (course_id, title, content, order_sequence, duration, video_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+    [course_id, title, finalContent, order_sequence || 1, normalizedDuration, video_url]
   );
+
+  // Format response with both duration formats
+  const responseData = {
+    ...lesson.rows[0],
+    duration_number: formatDurationForForm(lesson.rows[0].duration),
+    duration_display: lesson.rows[0].duration
+  };
 
   res.status(201).json({
     success: true,
-    data: lesson.rows[0],
+    data: responseData,
     message: 'Lesson created successfully'
   });
 });
 
 exports.updateLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, content, order_sequence, duration, status } = req.body;
+  const { title, content, order_sequence, duration, video_url, description, course_id } = req.body;
+
+  // Map description to content if content is not provided
+  const finalContent = content || description;
+
+  // Normalize duration to consistent format
+  const normalizedDuration = duration ? formatDurationForDB(duration) : duration;
 
   const lesson = await pool.query(
-    'UPDATE course_lessons SET title = $1, content = $2, order_sequence = $3, duration = $4, status = $5 WHERE id = $6 RETURNING *',
-    [title, content, order_sequence, duration, status, id]
+    'UPDATE course_lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_sequence = COALESCE($3, order_sequence), duration = COALESCE($4, duration), video_url = COALESCE($5, video_url), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+    [title, finalContent, order_sequence, normalizedDuration, video_url, course_id, id]
   );
 
   if (lesson.rows.length === 0) {
     return res.status(404).json({ error: 'Lesson not found' });
   }
 
+  // Format response with both duration formats
+  const responseData = {
+    ...lesson.rows[0],
+    duration_number: formatDurationForForm(lesson.rows[0].duration),
+    duration_display: lesson.rows[0].duration
+  };
+
   res.json({
     success: true,
-    data: lesson.rows[0],
+    data: responseData,
     message: 'Lesson updated successfully'
   });
 });

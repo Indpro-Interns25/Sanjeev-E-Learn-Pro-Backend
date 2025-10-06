@@ -30,6 +30,16 @@ class EnrollmentModel {
     );
     return rows;
   }
+  static async listAll() {
+    const { rows } = await pool.query(`
+      SELECT e.*, u.name AS user_name, u.email AS user_email, c.title AS course_title
+      FROM course_enrollments e
+      LEFT JOIN users u ON u.id = e.user_id
+      LEFT JOIN courses c ON c.id = e.course_id
+      ORDER BY e.id
+    `);
+    return rows;
+  }
   static async unenroll({ user_id, course_id }) {
     await pool.query('DELETE FROM course_enrollments WHERE user_id=$1 AND course_id=$2', [user_id, course_id]);
     return true;
