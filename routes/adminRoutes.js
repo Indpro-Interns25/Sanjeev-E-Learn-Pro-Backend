@@ -55,6 +55,15 @@ protectedRoutes.post('/lessons/reorder', adminController.reorderLessons);
 
 // Student Management
 protectedRoutes.get('/students', adminController.getAllStudents);
+// Create a new student (admin)
+protectedRoutes.post('/students', adminController.createStudent);
+// Update an existing student (admin)
+protectedRoutes.put('/students/:id', adminController.updateStudent);
+// Delete a student (admin)
+protectedRoutes.delete('/students/:id', adminController.deleteStudent);
+// Also accept singular path variants under /api/admin
+protectedRoutes.put('/student/:id', adminController.updateStudent);
+protectedRoutes.delete('/student/:id', adminController.deleteStudent);
 protectedRoutes.patch('/students/:id/approve', adminController.approveStudent);
 protectedRoutes.patch('/students/:id/reject', adminController.rejectStudent);
 protectedRoutes.patch('/students/:id/suspend', adminController.suspendStudent);
@@ -69,6 +78,8 @@ protectedRoutes.patch('/instructors/:id/reject', adminController.rejectInstructo
 protectedRoutes.patch('/instructors/:id/suspend', adminController.suspendInstructor);
 protectedRoutes.patch('/instructors/:id/activate', adminController.activateInstructor);
 protectedRoutes.get('/instructors/:id/profile', adminController.getInstructorProfile);
+// Delete an instructor (admin)
+protectedRoutes.delete('/instructors/:id', adminController.deleteInstructor);
 
 // Category Management
 protectedRoutes.get('/categories', adminController.getAllCategories);

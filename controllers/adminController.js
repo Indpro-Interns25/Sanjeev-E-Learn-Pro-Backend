@@ -2,6 +2,13 @@ const pool = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { formatDurationForDB, formatDurationForForm } = require('../utils/durationHelper');
 
+// Helper to check whether a column exists on a table (used to support older DBs)
+async function columnExists(tableName, columnName) {
+  const q = `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 LIMIT 1`;
+  const r = await pool.query(q, [tableName, columnName]);
+  return r.rows.length > 0;
+}
+
 // Dashboard Statistics
 exports.getDashboardStats = asyncHandler(async (req, res) => {
   const stats = await pool.query(`
@@ -689,6 +696,11 @@ exports.getAllStudents = asyncHandler(async (req, res) => {
 exports.approveStudent = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
+  // Ensure schema supports status column
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+  }
+
   const student = await pool.query(
     'UPDATE users SET status = $1 WHERE id = $2 AND role = $3 RETURNING *',
     ['active', id, 'student']
@@ -705,9 +717,127 @@ exports.approveStudent = asyncHandler(async (req, res) => {
   });
 });
 
+// Create a new student (admin)
+exports.createStudent = asyncHandler(async (req, res) => {
+  const { name, email, password, status = 'active' } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email and password are required' });
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  // Check if email exists
+  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+  if (existing.rows.length > 0) {
+    return res.status(409).json({ error: 'Email already exists' });
+  }
+
+  const bcrypt = require('bcrypt');
+  const saltRounds = 12;
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+  const result = await pool.query(
+    'INSERT INTO users (name, email, password, role, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id, name, email, role, status, created_at',
+    [name.trim(), email.toLowerCase().trim(), hashedPassword, 'student', status]
+  );
+
+  res.status(201).json({ success: true, data: result.rows[0], message: 'Student created successfully' });
+});
+
+// Update an existing student (admin)
+exports.updateStudent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, email, password, status } = req.body;
+
+  const studentId = parseInt(id, 10);
+  if (isNaN(studentId) || studentId <= 0) {
+    return res.status(400).json({ error: 'Invalid student ID' });
+  }
+
+  // Check if student exists
+  const existing = await pool.query('SELECT * FROM users WHERE id = $1 AND role = $2', [studentId, 'student']);
+  if (existing.rows.length === 0) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  const updates = [];
+  const values = [];
+  let idx = 1;
+
+  if (name !== undefined) { updates.push(`name = $${idx++}`); values.push(name); }
+  if (email !== undefined) { updates.push(`email = $${idx++}`); values.push(email.toLowerCase().trim()); }
+
+  // Only include status if the column exists in the database
+  if (status !== undefined) {
+    const hasStatus = await columnExists('users', 'status');
+    if (!hasStatus) {
+      return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+    }
+    updates.push(`status = $${idx++}`);
+    values.push(status);
+  }
+  if (password !== undefined) {
+    const bcrypt = require('bcrypt');
+    const saltRounds = 12;
+    const hashed = await bcrypt.hash(password, saltRounds);
+    updates.push(`password = $${idx++}`);
+    values.push(hashed);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No fields provided for update' });
+  }
+
+  // Only set updated_at if the column exists
+  const hasUpdatedAt = await columnExists('users', 'updated_at');
+  if (hasUpdatedAt) updates.push('updated_at = NOW()');
+  // Build RETURNING fields conditionally based on schema
+  const hasStatusInReturn = await columnExists('users', 'status');
+  const returningFields = ['id', 'name', 'email', 'role'];
+  if (hasStatusInReturn) returningFields.push('status');
+  if (hasUpdatedAt) returningFields.push('updated_at');
+  const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${idx} AND role = $${idx + 1} RETURNING ${returningFields.join(', ')}`;
+  values.push(studentId);
+  values.push('student');
+
+  const result = await pool.query(query, values);
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  res.json({ success: true, data: result.rows[0], message: 'Student updated successfully' });
+});
+
+// Delete a student (admin)
+exports.deleteStudent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const studentId = parseInt(id, 10);
+  if (isNaN(studentId) || studentId <= 0) {
+    return res.status(400).json({ error: 'Invalid student ID' });
+  }
+
+  const existing = await pool.query('SELECT id, name FROM users WHERE id = $1 AND role = $2', [studentId, 'student']);
+  if (existing.rows.length === 0) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  await pool.query('DELETE FROM users WHERE id = $1 AND role = $2', [studentId, 'student']);
+
+  res.json({ success: true, message: `Student deleted successfully (${existing.rows[0].name})` });
+});
+
 exports.rejectStudent = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
+
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+  }
 
   const student = await pool.query(
     'UPDATE users SET status = $1, rejection_reason = $2 WHERE id = $3 AND role = $4 RETURNING *',
@@ -729,6 +859,10 @@ exports.suspendStudent = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
 
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+  }
+
   const student = await pool.query(
     'UPDATE users SET status = $1, suspension_reason = $2 WHERE id = $3 AND role = $4 RETURNING *',
     ['suspended', reason, id, 'student']
@@ -747,6 +881,10 @@ exports.suspendStudent = asyncHandler(async (req, res) => {
 
 exports.activateStudent = asyncHandler(async (req, res) => {
   const { id } = req.params;
+
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+  }
 
   const student = await pool.query(
     'UPDATE users SET status = $1, suspension_reason = NULL WHERE id = $2 AND role = $3 RETURNING *',
@@ -1015,6 +1153,69 @@ exports.getInstructorProfile = asyncHandler(async (req, res) => {
       courses: courses.rows
     }
   });
+});
+
+// Delete an instructor (admin)
+exports.deleteInstructor = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const instructorId = parseInt(id, 10);
+  if (isNaN(instructorId) || instructorId <= 0) {
+    return res.status(400).json({ error: 'Invalid instructor ID' });
+  }
+
+  // Ensure the user exists and is an instructor
+  const existing = await pool.query('SELECT id, name, email FROM users WHERE id = $1 AND role = $2', [instructorId, 'instructor']);
+  if (existing.rows.length === 0) {
+    return res.status(404).json({ error: 'Instructor not found' });
+  }
+
+  // Prevent deleting instructors that still have published courses
+  const courses = await pool.query('SELECT id, title FROM courses WHERE instructor_id = $1', [instructorId]);
+  if (courses.rows.length > 0) {
+    return res.status(400).json({ error: 'Cannot delete instructor with existing courses. Reassign or delete courses first.' });
+  }
+
+  await pool.query('DELETE FROM users WHERE id = $1 AND role = $2', [instructorId, 'instructor']);
+
+  res.json({ success: true, message: `Instructor deleted successfully (${existing.rows[0].name})` });
+});
+
+// Public: list all instructors (no auth)
+exports.getPublicInstructors = asyncHandler(async (req, res) => {
+  const instructors = await pool.query(`
+    SELECT id, name, email, role, created_at
+    FROM users
+    WHERE role = 'instructor'
+    ORDER BY id DESC
+  `);
+
+  res.json({ success: true, data: instructors.rows });
+});
+
+// Public: get instructor profile by id (no auth)
+exports.getPublicInstructorProfile = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const instructor = await pool.query(`
+    SELECT id, name, email, role, created_at
+    FROM users
+    WHERE id = $1 AND role = 'instructor'
+  `, [id]);
+
+  if (instructor.rows.length === 0) {
+    return res.status(404).json({ error: 'Instructor not found' });
+  }
+
+  const courses = await pool.query(`
+    SELECT c.*,
+      COUNT(e.id) as enrollment_count
+    FROM courses c
+    LEFT JOIN course_enrollments e ON c.id = e.course_id
+    WHERE c.instructor_id = $1
+    GROUP BY c.id
+    ORDER BY c.id DESC
+  `, [id]);
+
+  res.json({ success: true, data: { instructor: instructor.rows[0], courses: courses.rows } });
 });
 
 // Category Management
@@ -1313,6 +1514,10 @@ exports.bulkApproveUsers = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'User IDs array and user type are required' });
   }
 
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
+  }
+
   const result = await pool.query(
     'UPDATE users SET status = $1 WHERE id = ANY($2) AND role = $3 RETURNING id, email',
     ['active', user_ids, user_type]
@@ -1330,6 +1535,10 @@ exports.bulkRejectUsers = asyncHandler(async (req, res) => {
 
   if (!Array.isArray(user_ids) || !user_type) {
     return res.status(400).json({ error: 'User IDs array and user type are required' });
+  }
+
+  if (!(await columnExists('users', 'status'))) {
+    return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
   }
 
   const result = await pool.query(
