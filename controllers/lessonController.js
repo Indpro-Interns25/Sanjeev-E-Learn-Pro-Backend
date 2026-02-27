@@ -12,10 +12,10 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
       l.*,
       c.title as course_title,
       u.name as instructor_name
-    FROM course_lessons l
+    FROM lessons l
     JOIN courses c ON l.course_id = c.id
     LEFT JOIN users u ON c.instructor_id = u.id
-    ORDER BY l.course_id, l.order_sequence, l.id
+    ORDER BY l.course_id, l.order_index, l.id
   `);
 
   // Format durations for frontend display
@@ -81,7 +81,13 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.getLessonById = asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  // Support multiple param names: id, lessonId, lectureId
+  const id = parseInt(req.params.id || req.params.lessonId || req.params.lectureId, 10);
+  
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid lesson ID' });
+  }
+  
   const lesson = await Lesson.findById(id);
   if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
   res.json(lesson);
@@ -105,7 +111,7 @@ exports.updateLesson = asyncHandler(async (req, res) => {
   // Update the lesson using direct database query to handle all fields including course_id
   const pool = require('../db');
   const updated = await pool.query(
-    'UPDATE course_lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_sequence = COALESCE($3, order_sequence), video_url = COALESCE($4, video_url), duration = COALESCE($5, duration), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+    'UPDATE lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_index = COALESCE($3, order_index), video_url = COALESCE($4, video_url), duration = COALESCE($5, duration), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
     [title, finalContent, position, video_url, normalizedDuration, course_id, id]
   );
 

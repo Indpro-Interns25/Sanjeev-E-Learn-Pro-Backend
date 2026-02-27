@@ -2,14 +2,15 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 async function createTables() {
-  console.log('🔧 Creating tables in pfladmin database...\n');
+  const dbName = process.env.PG_DATABASE || 'pfadmin';
+  console.log(`🔧 Creating tables in ${dbName} database...\n`);
   
   const pool = new Pool({
     host: process.env.PG_HOST,
     port: process.env.PG_PORT,
     user: process.env.PG_USER,
     password: process.env.PG_PASSWORD,
-    database: 'pfadmin',
+    database: dbName,
     ssl: process.env.PG_SSL === 'true'
   });
 
@@ -133,7 +134,7 @@ async function createTables() {
       ORDER BY table_name
     `);
     
-    console.log('\n📊 All tables in pfadmin database:');
+    console.log(`\n📊 All tables in ${dbName} database:`);
     tables.rows.forEach((table, index) => {
       console.log(`   ${index + 1}. ${table.table_name}`);
     });

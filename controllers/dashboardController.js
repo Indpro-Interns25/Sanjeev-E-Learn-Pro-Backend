@@ -13,7 +13,7 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     // Get courses in progress (enrolled but not completed)
     const coursesInProgressQuery = `
       SELECT COUNT(DISTINCT ce.course_id) as count
-      FROM course_enrollments ce
+      FROM enrollments ce
       WHERE ce.user_id = $1 
       AND ce.is_active = true
       AND ce.completed_at IS NULL
@@ -23,7 +23,7 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     // Get completed courses
     const completedCoursesQuery = `
       SELECT COUNT(DISTINCT ce.course_id) as count
-      FROM course_enrollments ce
+      FROM enrollments ce
       WHERE ce.user_id = $1 
       AND ce.completed_at IS NOT NULL
     `;
@@ -32,8 +32,8 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     // Get total lessons across all enrolled courses
     const totalLessonsQuery = `
       SELECT COUNT(DISTINCT cl.id) as count
-      FROM course_lessons cl
-      INNER JOIN course_enrollments ce ON cl.course_id = ce.course_id
+      FROM lessons cl
+      INNER JOIN enrollments ce ON cl.course_id = ce.course_id
       WHERE ce.user_id = $1 AND ce.is_active = true
     `;
     const totalLessons = await pool.query(totalLessonsQuery, [userId]);
@@ -41,9 +41,9 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     // Get completed lessons
     const completedLessonsQuery = `
       SELECT COUNT(*) as count
-      FROM lesson_progress lp
+      FROM progress lp
       WHERE lp.user_id = $1 
-      AND lp.is_completed = true
+      AND lp.completed = true
     `;
     const completedLessons = await pool.query(completedLessonsQuery, [userId]);
 
@@ -63,12 +63,12 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
           WHEN ce.progress > 0 THEN 'in_progress'
           ELSE 'not_started'
         END as status,
-        (SELECT COUNT(*) FROM course_lessons WHERE course_id = c.id) as total_lessons,
-        (SELECT COUNT(*) FROM lesson_progress lp 
-         INNER JOIN course_lessons cl ON lp.lesson_id = cl.id 
-         WHERE cl.course_id = c.id AND lp.user_id = ce.user_id AND lp.is_completed = true) as completed_lessons
+        (SELECT COUNT(*) FROM lessons WHERE course_id = c.id) as total_lessons,
+        (SELECT COUNT(*) FROM progress lp 
+         INNER JOIN lessons cl ON lp.lesson_id = cl.id 
+         WHERE cl.course_id = c.id AND lp.user_id = ce.user_id AND lp.completed = true) as completed_lessons
       FROM courses c
-      INNER JOIN course_enrollments ce ON c.id = ce.course_id
+      INNER JOIN enrollments ce ON c.id = ce.course_id
       WHERE ce.user_id = $1 AND ce.is_active = true
       ORDER BY 
         CASE 
@@ -119,10 +119,10 @@ exports.getRecentActivity = asyncHandler(async (req, res) => {
         cl.title as lesson_title,
         c.title as course_title,
         c.id as course_id
-      FROM lesson_progress lp
-      INNER JOIN course_lessons cl ON lp.lesson_id = cl.id
+      FROM progress lp
+      INNER JOIN lessons cl ON lp.lesson_id = cl.id
       INNER JOIN courses c ON cl.course_id = c.id
-      WHERE lp.user_id = $1 AND lp.is_completed = true
+      WHERE lp.user_id = $1 AND lp.completed = true
       
       UNION ALL
       
@@ -132,7 +132,7 @@ exports.getRecentActivity = asyncHandler(async (req, res) => {
         null as lesson_title,
         c.title as course_title,
         c.id as course_id
-      FROM course_enrollments ce
+      FROM enrollments ce
       INNER JOIN courses c ON ce.course_id = c.id
       WHERE ce.user_id = $1
       
@@ -165,15 +165,14 @@ exports.getCourseProgress = asyncHandler(async (req, res) => {
         c.title as course_title,
         cl.id as lesson_id,
         cl.title as lesson_title,
-        cl.order_sequence,
-        COALESCE(lp.is_completed, false) as is_completed,
-        lp.completed_at,
-        lp.watch_time
+        cl.order_index,
+        COALESCE(lp.completed, false) as is_completed,
+        lp.completed_at
       FROM courses c
-      INNER JOIN course_lessons cl ON c.id = cl.course_id
-      LEFT JOIN lesson_progress lp ON cl.id = lp.lesson_id AND lp.user_id = $1
+      INNER JOIN lessons cl ON c.id = cl.course_id
+      LEFT JOIN progress lp ON cl.id = lp.lesson_id AND lp.user_id = $1
       WHERE c.id = $2
-      ORDER BY cl.order_sequence, cl.id
+      ORDER BY cl.order_index, cl.id
     `;
 
     const courseProgress = await pool.query(courseProgressQuery, [userId, courseId]);

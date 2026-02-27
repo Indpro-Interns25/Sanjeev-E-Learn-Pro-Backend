@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
@@ -222,6 +223,65 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`   http://localhost:${PORT}`);
   console.log('🚀 ================================\n');
 });
+
+// Initialize Socket.IO with CORS configuration
+const io = new Server(server, {
+  cors: {
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'],
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log(`🔌 Socket.IO: Client connected - ${socket.id}`);
+  
+  // Handle room joining (for course-specific chat)
+  socket.on('join-course', (courseId) => {
+    socket.join(`course-${courseId}`);
+    console.log(`📚 Socket ${socket.id} joined course ${courseId}`);
+    socket.emit('joined-course', courseId);
+  });
+  
+  // Handle leaving room
+  socket.on('leave-course', (courseId) => {
+    socket.leave(`course-${courseId}`);
+    console.log(`🚪 Socket ${socket.id} left course ${courseId}`);
+  });
+  
+  // Handle chat messages
+  socket.on('chat-message', (data) => {
+    const { courseId, message, user } = data;
+    console.log(`💬 Chat message in course ${courseId} from ${user?.name || 'Anonymous'}`);
+    
+    // Broadcast to all users in the course room
+    io.to(`course-${courseId}`).emit('chat-message', {
+      id: Date.now(),
+      message,
+      user,
+      timestamp: new Date().toISOString()
+    });
+  });
+  
+  // Handle typing indicator
+  socket.on('typing', (data) => {
+    const { courseId, user } = data;
+    socket.to(`course-${courseId}`).emit('user-typing', { user });
+  });
+  
+  socket.on('stop-typing', (data) => {
+    const { courseId, user } = data;
+    socket.to(`course-${courseId}`).emit('user-stopped-typing', { user });
+  });
+  
+  // Handle disconnect
+  socket.on('disconnect', () => {
+    console.log(`🔌 Socket.IO: Client disconnected - ${socket.id}`);
+  });
+});
+
+console.log('✅ Socket.IO initialized for real-time features\n');
 
 // Enhanced error handling
 server.on('error', (err) => {
