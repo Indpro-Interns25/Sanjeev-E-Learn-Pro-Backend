@@ -12,7 +12,15 @@ const progressRoutes = require('./progressRoutes');
 const authRoutes = require('./authRoutes');
 const adminRoutes = require('./adminRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
-const { validateToken } = require('../controllers/authController');
+const paymentRoutes = require('./paymentRoutes');
+const quizRoutes = require('./quizRoutes');
+const commentRoutes = require('./commentRoutes');
+const learningRoutes = require('./learningRoutes');
+const noteRoutes = require('./noteRoutes');
+const certificateRoutes = require('./certificateRoutes');
+const analyticsRoutes = require('./analyticsRoutes');
+const quizSystemRoutes = require('./quizSystemRoutes');
+const { validateToken } = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
 
 // Middleware to require admin role for inline aliases
@@ -25,6 +33,7 @@ router.get('/', homeController.index);
 router.get('/health', healthController.health);
 
 router.use('/users', userRoutes);
+router.use('/user', userRoutes);  // Spec: /api/user/stats, /api/user/enrolled-courses
 router.use('/courses', courseRoutes);
 router.use('/lessons', lessonRoutes);
 router.use('/enrollments', enrollmentRoutes);
@@ -32,6 +41,15 @@ router.use('/progress', progressRoutes);
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/payments', paymentRoutes);
+router.use('/quizzes', quizRoutes);
+router.use('/comments', commentRoutes);
+router.use('/learning', learningRoutes);
+router.use('/notes', noteRoutes);
+router.use('/certificates', certificateRoutes);
+router.use('/certificate', certificateRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/quiz', quizSystemRoutes);
 
 // Accept common frontend path variants for student edit/delete and forward to admin handlers
 router.put('/students/:id', validateToken, requireAdmin, adminController.updateStudent);

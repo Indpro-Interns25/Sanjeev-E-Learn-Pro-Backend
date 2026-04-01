@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { login, register, validateToken, adminLogin } = require('../controllers/authController');
+const { login, register, adminLogin, getMe, forgotPassword } = require('../controllers/authController');
+const { validateToken } = require('../middleware/authMiddleware');
 const pool = require('../db');
 
 // Handle OPTIONS requests for CORS preflight
@@ -85,5 +86,11 @@ router.post('/logout', (req, res) => {
     instructions: 'Clear the token from localStorage and redirect to login page'
   });
 });
+
+// GET /auth/me - Validate token and return current user
+router.get('/me', validateToken, getMe);
+
+// POST /auth/forgot-password
+router.post('/forgot-password', forgotPassword);
 
 module.exports = router;

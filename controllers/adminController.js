@@ -1589,4 +1589,111 @@ exports.exportData = asyncHandler(async (req, res) => {
   });
 });
 
+// Analytics: Enrollment trends
+exports.getAnalyticsEnrollments = asyncHandler(async (req, res) => {
+  const { period = '30d' } = req.query;
+  let interval = '30 days';
+  if (period === '7d') interval = '7 days';
+  if (period === '90d') interval = '90 days';
+
+  const result = await pool.query(`
+    SELECT
+      DATE(enrolled_at) as date,
+      COUNT(*) as enrollments,
+      COUNT(DISTINCT user_id) as unique_students,
+      COUNT(DISTINCT course_id) as unique_courses
+    FROM enrollments
+    WHERE enrolled_at >= NOW() - INTERVAL '${interval}'
+    GROUP BY DATE(enrolled_at)
+    ORDER BY date DESC
+  `);
+
+  res.json({ success: true, data: result.rows });
+});
+
+// Analytics: Top performing courses
+exports.getTopCourses = asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit) || 10;
+  const result = await pool.query(`
+    SELECT
+      c.id,
+      c.title,
+      c.category,
+      c.price,
+      COUNT(DISTINCT e.id) as enrollment_count,
+      COUNT(DISTINCT l.id) as lesson_count
+    FROM courses c
+    LEFT JOIN enrollments e ON c.id = e.course_id
+    LEFT JOIN lessons l ON c.id = l.course_id
+    GROUP BY c.id, c.title, c.category, c.price
+    ORDER BY enrollment_count DESC
+    LIMIT $1
+  `, [limit]);
+
+  res.json({ success: true, data: result.rows });
+});
+
+// Analytics: Users by role
+exports.getUsersByRole = asyncHandler(async (req, res) => {
+  const result = await pool.query(`
+    SELECT role, COUNT(*) as count
+    FROM users
+    GROUP BY role
+    ORDER BY count DESC
+  `);
+
+  res.json({ success: true, data: result.rows });
+});
+
+// Report: Course performance
+exports.getCourseReports = asyncHandler(async (req, res) => {
+  const result = await pool.query(`
+    SELECT
+      c.id,
+      c.title,
+      c.category,
+      c.level,
+      c.price,
+      COUNT(DISTINCT e.id) as total_enrollments,
+      COUNT(DISTINCT l.id) as total_lessons,
+      ROUND(
+        COALESCE(
+          (COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.user_id END) * 100.0 /
+           NULLIF(COUNT(DISTINCT e.user_id), 0)), 0
+        ), 2
+      ) as avg_completion_rate
+    FROM courses c
+    LEFT JOIN enrollments e ON c.id = e.course_id
+    LEFT JOIN lessons l ON c.id = l.course_id
+    LEFT JOIN progress lp ON l.id = lp.lesson_id
+    GROUP BY c.id, c.title, c.category, c.level, c.price
+    ORDER BY total_enrollments DESC
+  `);
+
+  res.json({ success: true, data: result.rows });
+});
+
+// Report: User engagement
+exports.getUserReports = asyncHandler(async (req, res) => {
+  const result = await pool.query(`
+    SELECT
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      u.created_at,
+      COUNT(DISTINCT e.course_id) as enrolled_courses,
+      COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.id END) as completed_lessons
+    FROM users u
+    LEFT JOIN enrollments e ON u.id = e.user_id
+    LEFT JOIN progress lp ON u.id = lp.user_id
+    WHERE u.role = 'student'
+    GROUP BY u.id, u.name, u.email, u.role, u.created_at
+    ORDER BY enrolled_courses DESC
+    LIMIT 100
+  `);
+
+  res.json({ success: true, data: result.rows });
+});
+
 module.exports = exports;

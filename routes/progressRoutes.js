@@ -8,4 +8,8 @@ router.post('/', progressController.createProgress);
 router.put('/:id', progressController.updateProgress);
 router.delete('/:id', progressController.deleteProgress);
 
+// Spec routes
+router.get('/:userId/course/:courseId', progressController.getCourseProgress);
+router.post('/:userId/lesson/:lessonId/complete', progressController.completeLesson);
+
 module.exports = router;

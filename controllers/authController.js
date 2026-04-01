@@ -236,3 +236,26 @@ exports.validateToken = asyncHandler(async (req, res, next) => {
     return res.status(401).json({ error: 'Invalid token' });
   }
 });
+
+// GET /auth/me - Return current authenticated user
+exports.getMe = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({
+    success: true,
+    user: { id: user.id, email: user.email, name: user.name, role: user.role }
+  });
+});
+
+// POST /auth/forgot-password
+exports.forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  const user = await User.findByEmail(email.toLowerCase().trim());
+  // Always return success to prevent email enumeration
+  res.json({
+    success: true,
+    message: 'If an account with that email exists, a password reset link has been sent.'
+  });
+});

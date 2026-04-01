@@ -20,4 +20,14 @@ router.get('/:courseId/curriculum', lessonController.getCurriculum);
 router.get('/:courseId/lectures', lessonController.listByCourse);
 router.get('/:courseId/lectures/:lectureId', lessonController.getLessonById);
 
+// Lesson comments
+router.post('/:courseId/lessons/:lessonId/comments', courseController.addLessonComment);
+
+// Course comments
+router.get('/:courseId/comments', courseController.getCourseComments);
+router.post('/:courseId/comments', courseController.addCourseComment);
+
+// Course quiz
+router.get('/:courseId/quiz', courseController.getCourseQuiz);
+
 module.exports = router;

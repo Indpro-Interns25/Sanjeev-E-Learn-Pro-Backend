@@ -111,7 +111,7 @@ exports.updateLesson = asyncHandler(async (req, res) => {
   // Update the lesson using direct database query to handle all fields including course_id
   const pool = require('../db');
   const updated = await pool.query(
-    'UPDATE lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_index = COALESCE($3, order_index), video_url = COALESCE($4, video_url), duration = COALESCE($5, duration), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+    'UPDATE lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_index = COALESCE($3, order_index), order_number = COALESCE($3, order_number), video_url = COALESCE($4, video_url), duration = COALESCE($5, duration), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
     [title, finalContent, position, video_url, normalizedDuration, course_id, id]
   );
 
@@ -152,4 +152,31 @@ exports.remove = asyncHandler(async (req, res) => {
   
   await Lesson.remove(id);
   res.status(204).send();
+});
+
+// GET /api/lessons/:lessonId/comments
+exports.getLessonComments = asyncHandler(async (req, res) => {
+  const lessonId = parseInt(req.params.lessonId || req.params.id, 10);
+  const pool = require('../db');
+  const result = await pool.query(`
+    SELECT c.*, u.name as author_name, u.email as author_email
+    FROM comments c
+    JOIN users u ON c.user_id = u.id
+    WHERE c.lesson_id = $1
+    ORDER BY c.created_at DESC
+  `, [lessonId]);
+  res.json({ success: true, data: result.rows });
+});
+
+// POST /api/lessons/:lessonId/comments
+exports.addLessonComment = asyncHandler(async (req, res) => {
+  const lessonId = parseInt(req.params.lessonId || req.params.id, 10);
+  const { user_id, content, course_id } = req.body;
+  if (!user_id || !content) return res.status(400).json({ error: 'user_id and content are required' });
+  const pool = require('../db');
+  const result = await pool.query(
+    'INSERT INTO comments (lesson_id, course_id, user_id, content) VALUES ($1, $2, $3, $4) RETURNING *',
+    [lessonId, course_id || null, user_id, content]
+  );
+  res.status(201).json({ success: true, data: result.rows[0] });
 });

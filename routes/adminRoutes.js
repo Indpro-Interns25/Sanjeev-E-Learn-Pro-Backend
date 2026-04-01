@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { validateToken, login } = require('../controllers/authController');
+const { validateToken } = require('../middleware/authMiddleware');
+const { login } = require('../controllers/authController');
 const adminController = require('../controllers/adminController');
 
 // Admin login endpoint (same as regular login but with admin role check)
@@ -29,10 +30,14 @@ protectedRoutes.use(requireAdmin);
 
 // Dashboard & Analytics
 protectedRoutes.get('/dashboard/stats', adminController.getDashboardStats);
-protectedRoutes.get('/stats', adminController.getDashboardStats); // Add shorthand route
+protectedRoutes.get('/stats', adminController.getDashboardStats);
+protectedRoutes.get('/analytics/stats', adminController.getDashboardStats);
 protectedRoutes.get('/analytics/users', adminController.getUserAnalytics);
 protectedRoutes.get('/analytics/courses', adminController.getCourseAnalytics);
 protectedRoutes.get('/analytics/revenue', adminController.getRevenueAnalytics);
+protectedRoutes.get('/analytics/enrollments', adminController.getAnalyticsEnrollments);
+protectedRoutes.get('/analytics/top-courses', adminController.getTopCourses);
+protectedRoutes.get('/analytics/users-by-role', adminController.getUsersByRole);
 
 // Course Management
 protectedRoutes.get('/courses', adminController.getAllCourses);
@@ -103,8 +108,12 @@ protectedRoutes.patch('/notifications/:id/read', adminController.markNotificatio
 
 // Reports
 protectedRoutes.get('/reports/enrollment', adminController.getEnrollmentReport);
+protectedRoutes.get('/reports/enrollments', adminController.getEnrollmentReport);
 protectedRoutes.get('/reports/completion', adminController.getCompletionReport);
 protectedRoutes.get('/reports/activity', adminController.getActivityReport);
+protectedRoutes.get('/reports/courses', adminController.getCourseReports);
+protectedRoutes.get('/reports/users', adminController.getUserReports);
+protectedRoutes.get('/reports/revenue', adminController.getRevenueAnalytics);
 
 // Bulk Operations
 protectedRoutes.post('/bulk/approve-users', adminController.bulkApproveUsers);

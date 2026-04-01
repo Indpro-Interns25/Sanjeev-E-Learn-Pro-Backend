@@ -11,7 +11,10 @@ router.post('/', lessonController.create);
 // Direct lesson access endpoints
 router.get('/:id', lessonController.getLessonById);
 router.put('/:id', lessonController.updateLesson);
-
 router.delete('/:id', lessonController.remove);
+
+// Lesson comments
+router.get('/:lessonId/comments', lessonController.getLessonComments);
+router.post('/:lessonId/comments', lessonController.addLessonComment);
 
 module.exports = router;

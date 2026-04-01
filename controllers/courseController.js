@@ -2,9 +2,13 @@ const Course = require('../models/courseModel');
 const asyncHandler = require('../utils/asyncHandler');
 
 exports.list = asyncHandler(async (req, res) => {
-  const { featured, sortBy, sortOrder, limit } = req.query;
+  const { featured, sortBy, sortOrder, title, search, category, level } = req.query;
+  const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10), 1), 100);
+  const offset = (page - 1) * limit;
   
   let query = 'SELECT * FROM courses';
+  let countQuery = 'SELECT COUNT(*)::int AS total FROM courses';
   const queryParams = [];
   const conditions = [];
   
@@ -13,10 +17,28 @@ exports.list = asyncHandler(async (req, res) => {
     conditions.push('is_featured = $' + (queryParams.length + 1));
     queryParams.push(true);
   }
+
+  const searchText = search || title;
+  if (searchText) {
+    conditions.push('(title ILIKE $' + (queryParams.length + 1) + ' OR description ILIKE $' + (queryParams.length + 1) + ')');
+    queryParams.push(`%${searchText.trim()}%`);
+  }
+
+  if (category) {
+    conditions.push('category ILIKE $' + (queryParams.length + 1));
+    queryParams.push(category.trim());
+  }
+
+  if (level) {
+    conditions.push('level ILIKE $' + (queryParams.length + 1));
+    queryParams.push(level.trim());
+  }
   
   // Add WHERE clause if there are conditions
   if (conditions.length > 0) {
-    query += ' WHERE ' + conditions.join(' AND ');
+    const whereClause = ' WHERE ' + conditions.join(' AND ');
+    query += whereClause;
+    countQuery += whereClause;
   }
   
   // Handle sorting
@@ -32,14 +54,22 @@ exports.list = asyncHandler(async (req, res) => {
     query += ' ORDER BY id';
   }
   
-  // Handle limit
-  if (limit && !isNaN(parseInt(limit))) {
-    query += ' LIMIT $' + (queryParams.length + 1);
-    queryParams.push(parseInt(limit));
-  }
+  query += ' LIMIT $' + (queryParams.length + 1) + ' OFFSET $' + (queryParams.length + 2);
+  queryParams.push(limit, offset);
   
   const courses = await Course.findAllWithQuery(query, queryParams);
-  res.json(courses);
+  const countResult = await Course.findAllWithQuery(countQuery, queryParams.slice(0, queryParams.length - 2));
+
+  res.json({
+    success: true,
+    data: courses,
+    pagination: {
+      page,
+      limit,
+      total: countResult[0]?.total || 0,
+      totalPages: Math.ceil((countResult[0]?.total || 0) / limit)
+    }
+  });
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -179,4 +209,61 @@ exports.remove = asyncHandler(async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Course not found' });
   await Course.remove(id);
   res.status(204).send();
+});
+
+// GET /api/courses/:courseId/comments
+exports.getCourseComments = asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.courseId, 10);
+  const pool = require('../db');
+  const result = await pool.query(`
+    SELECT c.*, u.name as author_name, u.email as author_email
+    FROM comments c
+    JOIN users u ON c.user_id = u.id
+    WHERE c.course_id = $1 AND c.lesson_id IS NULL
+    ORDER BY c.created_at DESC
+  `, [courseId]);
+  res.json({ success: true, data: result.rows });
+});
+
+// POST /api/courses/:courseId/comments
+exports.addCourseComment = asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.courseId, 10);
+  const { user_id, content } = req.body;
+  if (!user_id || !content) return res.status(400).json({ error: 'user_id and content are required' });
+  const pool = require('../db');
+  const result = await pool.query(
+    'INSERT INTO comments (course_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
+    [courseId, user_id, content]
+  );
+  res.status(201).json({ success: true, data: result.rows[0] });
+});
+
+// POST /api/courses/:courseId/lessons/:lessonId/comments
+exports.addLessonComment = asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.courseId, 10);
+  const lessonId = parseInt(req.params.lessonId, 10);
+  const { user_id, content } = req.body;
+  if (!user_id || !content) return res.status(400).json({ error: 'user_id and content are required' });
+  const pool = require('../db');
+  const result = await pool.query(
+    'INSERT INTO comments (course_id, lesson_id, user_id, content) VALUES ($1, $2, $3, $4) RETURNING *',
+    [courseId, lessonId, user_id, content]
+  );
+  res.status(201).json({ success: true, data: result.rows[0] });
+});
+
+// GET /api/courses/:courseId/quiz
+exports.getCourseQuiz = asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.courseId, 10);
+  const pool = require('../db');
+  const quiz = await pool.query(
+    'SELECT * FROM quizzes WHERE course_id = $1 LIMIT 1',
+    [courseId]
+  );
+  if (quiz.rows.length === 0) return res.status(404).json({ error: 'No quiz found for this course' });
+  const questions = await pool.query(
+    'SELECT id, question, options FROM quiz_questions WHERE quiz_id = $1 ORDER BY id',
+    [quiz.rows[0].id]
+  );
+  res.json({ success: true, data: { ...quiz.rows[0], questions: questions.rows } });
 });
