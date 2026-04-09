@@ -20,6 +20,11 @@ const noteRoutes = require('./noteRoutes');
 const certificateRoutes = require('./certificateRoutes');
 const analyticsRoutes = require('./analyticsRoutes');
 const quizSystemRoutes = require('./quizSystemRoutes');
+const statsRoutes = require('./statsRoutes');
+const videoRoutes = require('./videoRoutes');
+const liveClassRoutes = require('./liveClassRoutes');
+const chatRoutes = require('./chatRoutes');
+const notificationRoutes = require('./notificationRoutes');
 const { validateToken } = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
 
@@ -49,7 +54,12 @@ router.use('/notes', noteRoutes);
 router.use('/certificates', certificateRoutes);
 router.use('/certificate', certificateRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/stats', statsRoutes);
 router.use('/quiz', quizSystemRoutes);
+router.use('/videos', videoRoutes);
+router.use('/live-classes', liveClassRoutes);
+router.use('/chat', chatRoutes);
+router.use('/notifications', notificationRoutes);
 
 // Accept common frontend path variants for student edit/delete and forward to admin handlers
 router.put('/students/:id', validateToken, requireAdmin, adminController.updateStudent);

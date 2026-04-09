@@ -52,12 +52,18 @@ const pool = require('../db');
 
     await client.query(`
       ALTER TABLE courses 
-      ADD COLUMN IF NOT EXISTS price DECIMAL(10,2) DEFAULT 0
+      ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT true
     `);
 
     await client.query(`
-      ALTER TABLE courses 
-      ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT true
+      UPDATE courses
+      SET is_free = true
+      WHERE is_free IS DISTINCT FROM true
+    `);
+
+    await client.query(`
+      ALTER TABLE courses
+      DROP COLUMN IF EXISTS price
     `);
 
     await client.query(`

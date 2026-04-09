@@ -42,6 +42,22 @@ const pool = require('../db');
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
     `);
 
+    await client.query(`
+      ALTER TABLE courses 
+      ADD COLUMN IF NOT EXISTS is_free BOOLEAN NOT NULL DEFAULT true
+    `);
+
+    await client.query(`
+      UPDATE courses
+      SET is_free = true
+      WHERE is_free IS DISTINCT FROM true
+    `);
+
+    await client.query(`
+      ALTER TABLE courses 
+      DROP COLUMN IF EXISTS price
+    `);
+
     // Add check constraint for course level
     await client.query(`
       ALTER TABLE courses 
@@ -78,7 +94,7 @@ const pool = require('../db');
     
     // Show summary
     console.log('\n📊 Migration Summary:');
-    console.log('✅ Added level, duration, rating, thumbnail, preview_video to courses');
+    console.log('✅ Added level, duration, rating, thumbnail, preview_video, is_free to courses');
     console.log('✅ Added duration and updated_at to lessons');
     console.log('✅ Added level constraint (Beginner/Intermediate/Advanced)');
     console.log('\n🚀 Database is ready for course seeding!');

@@ -1,9 +1,19 @@
 const asyncHandler = require('../utils/asyncHandler');
 const pool = require('../db');
 
+async function tableExists(tableName) {
+  const result = await pool.query('SELECT to_regclass($1) AS exists', [tableName]);
+  return Boolean(result.rows[0]?.exists);
+}
+
 exports.getPlatformAnalytics = asyncHandler(async (req, res) => {
-  const [users, enrollments, completionStats, popularCourses] = await Promise.all([
+  const [users, activeUsers, enrollments, completionStats, popularCourses, recentActivity] = await Promise.all([
     pool.query('SELECT COUNT(*)::int AS total_users FROM users'),
+    pool.query(`
+      SELECT COUNT(DISTINCT user_id)::int AS active_users
+      FROM activity_logs
+      WHERE created_at >= NOW() - INTERVAL '30 days' AND user_id IS NOT NULL
+    `),
     pool.query('SELECT COUNT(*)::int AS total_enrollments FROM enrollments WHERE is_active = true'),
     pool.query(
       `SELECT
@@ -22,16 +32,43 @@ exports.getPlatformAnalytics = asyncHandler(async (req, res) => {
        GROUP BY c.id, c.title
        ORDER BY enrollments DESC, c.id ASC
        LIMIT 10`
+    ),
+    pool.query(
+      `SELECT action, COUNT(*)::int AS count
+       FROM activity_logs
+       WHERE created_at >= NOW() - INTERVAL '7 days'
+       GROUP BY action
+       ORDER BY count DESC
+       LIMIT 10`
     )
   ]);
+
+  let revenue = {
+    total_revenue: 0,
+    monthly_revenue: 0
+  };
+
+  if (await tableExists('payments')) {
+    const revenueResult = await pool.query(
+      `SELECT
+         COALESCE(SUM(amount), 0)::numeric(12,2) AS total_revenue,
+         COALESCE(SUM(CASE WHEN created_at >= date_trunc('month', NOW()) THEN amount ELSE 0 END), 0)::numeric(12,2) AS monthly_revenue
+       FROM payments
+       WHERE status IN ('success', 'completed', 'paid')`
+    );
+    revenue = revenueResult.rows[0] || revenue;
+  }
 
   res.json({
     success: true,
     data: {
       total_users: users.rows[0].total_users,
+      active_users_last_30_days: activeUsers.rows[0]?.active_users || 0,
       total_enrollments: enrollments.rows[0].total_enrollments,
+      revenue,
       completion_stats: completionStats.rows,
-      most_popular_courses: popularCourses.rows
+      most_popular_courses: popularCourses.rows,
+      recent_activity: recentActivity.rows
     }
   });
 });

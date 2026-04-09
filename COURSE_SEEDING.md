@@ -19,7 +19,7 @@ npm run seed:courses
 
 - **20 Professional Courses** across 13 categories
 - **110+ Video Lectures** with real YouTube content
-- **All FREE courses** (price = 0) ready for testing
+- **All FREE courses** (`isFree: true`) ready for testing
 - **Production-ready** course data for your LMS
 
 ## 📚 Course Distribution

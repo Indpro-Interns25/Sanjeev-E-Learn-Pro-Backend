@@ -3,7 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 
 // Get dashboard statistics for a user
 exports.getDashboardStats = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.params.userId || req.query.userId;
+  const userId = req.user?.id;
   
   if (!userId) {
     return res.status(400).json({ error: 'User ID is required' });
@@ -105,7 +105,7 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
 
 // Get recent activity for dashboard
 exports.getRecentActivity = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.params.userId || req.query.userId;
+  const userId = req.user?.id;
   
   if (!userId) {
     return res.status(400).json({ error: 'User ID is required' });
@@ -151,7 +151,7 @@ exports.getRecentActivity = asyncHandler(async (req, res) => {
 
 // Get course progress details
 exports.getCourseProgress = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.query.userId;
+  const userId = req.user?.id;
   const courseId = req.params.courseId;
   
   if (!userId || !courseId) {
@@ -159,6 +159,14 @@ exports.getCourseProgress = asyncHandler(async (req, res) => {
   }
 
   try {
+    const enrollmentCheck = await pool.query(
+      'SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+      [userId, courseId]
+    );
+    if (enrollmentCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Forbidden: not enrolled in this course' });
+    }
+
     const courseProgressQuery = `
       SELECT 
         c.id as course_id,

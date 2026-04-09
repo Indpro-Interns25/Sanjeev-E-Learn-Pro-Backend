@@ -13,6 +13,7 @@
     "migrate:lms": "node scripts/migrate-lms-production.js",
     "migrate:quiz": "node scripts/migrate-quiz-system.js",
     "migrate:courses": "node scripts/add-course-columns.js",
+    "migrate:free": "node scripts/migrate-free-courses.js",
     "seed:courses": "node seeders/courses-seeder.js",
     "fix:videos": "node scripts/update-video-urls.js",
     "fix:tables": "node scripts/fix-table-references.js"

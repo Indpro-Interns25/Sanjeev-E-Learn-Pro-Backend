@@ -9,6 +9,15 @@ async function columnExists(tableName, columnName) {
   return r.rows.length > 0;
 }
 
+function normalizeCoursePricing(course) {
+  if (!course) return course;
+  const { price, is_free, ...rest } = course;
+  return {
+    ...rest,
+    isFree: true
+  };
+}
+
 // Dashboard Statistics
 exports.getDashboardStats = asyncHandler(async (req, res) => {
   const stats = await pool.query(`
@@ -86,7 +95,6 @@ exports.getCourseAnalytics = asyncHandler(async (req, res) => {
     SELECT 
       c.id,
       c.title,
-      c.price,
       COUNT(e.id) as enrollment_count,
       COALESCE(AVG(CASE WHEN lp.is_completed = true THEN 1.0 ELSE 0.0 END) * 100, 0) as completion_rate
     FROM courses c
@@ -94,7 +102,7 @@ exports.getCourseAnalytics = asyncHandler(async (req, res) => {
     LEFT JOIN progress lp ON e.user_id = lp.user_id AND lp.lesson_id IN (
       SELECT id FROM lessons WHERE course_id = c.id
     )
-    GROUP BY c.id, c.title, c.price
+    GROUP BY c.id, c.title
     ORDER BY enrollment_count DESC
   `);
 
@@ -157,7 +165,7 @@ exports.getAllCourses = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: courses.rows
+    data: courses.rows.map(normalizeCoursePricing)
   });
 });
 
@@ -201,7 +209,7 @@ exports.getCourseById = asyncHandler(async (req, res) => {
   console.log(`✅ Course found: ${course.rows[0].title}`);
   res.json({
     success: true,
-    data: course.rows[0]
+    data: normalizeCoursePricing(course.rows[0])
   });
 });
 
@@ -211,7 +219,6 @@ exports.createCourse = asyncHandler(async (req, res) => {
     description, 
     category, 
     level,
-    price, 
     duration,
     status = 'published', 
     instructor_id,
@@ -250,32 +257,32 @@ exports.createCourse = asyncHandler(async (req, res) => {
     instructor_id: instructor_id || 1,
     category: category || 'General',
     level: normalizedLevel,
-    price: price || 0,
     duration: duration || '4 weeks',
     status: normalizedStatus,
     thumbnail: thumbnail || null,
-    preview_video: preview_video || null
+    preview_video: preview_video || null,
+    is_free: true
   };
 
   const course = await pool.query(
-    'INSERT INTO courses (title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+    'INSERT INTO courses (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, is_free) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
     [
       courseData.title,
       courseData.description,
       courseData.instructor_id,
       courseData.category,
       courseData.level,
-      courseData.price,
       courseData.duration,
       courseData.status,
       courseData.thumbnail,
-      courseData.preview_video
+      courseData.preview_video,
+      true
     ]
   );
 
   res.status(201).json({
     success: true,
-    data: course.rows[0],
+    data: normalizeCoursePricing(course.rows[0]),
     message: 'Course created successfully'
   });
 });
@@ -287,7 +294,6 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     description, 
     category, 
     level, 
-    price, 
     duration, 
     status, 
     instructor_id, 
@@ -326,10 +332,6 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     updates.push(`level = $${paramCount++}`);
     values.push(level);
   }
-  if (price !== undefined) {
-    updates.push(`price = $${paramCount++}`);
-    values.push(price);
-  }
   if (duration !== undefined) {
     updates.push(`duration = $${paramCount++}`);
     values.push(duration);
@@ -354,6 +356,8 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     updates.push(`is_featured = $${paramCount++}`);
     values.push(is_featured);
   }
+
+  updates.push(`is_free = true`);
 
   if (updates.length === 0) {
     return res.status(400).json({
@@ -380,7 +384,7 @@ exports.updateCourse = asyncHandler(async (req, res) => {
   console.log(`✅ Course updated successfully: ${course.rows[0].title}`);
   res.json({
     success: true,
-    data: course.rows[0],
+    data: normalizeCoursePricing(course.rows[0]),
     message: 'Course updated successfully'
   });
 });
@@ -459,13 +463,9 @@ exports.rejectCourse = asyncHandler(async (req, res) => {
 
 exports.updateCoursePricing = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { price, is_free } = req.body;
-
-  const finalPrice = is_free ? 0 : price;
-
   const course = await pool.query(
-    'UPDATE courses SET price = $1, is_free = $2 WHERE id = $3 RETURNING *',
-    [finalPrice, is_free, id]
+    'UPDATE courses SET is_free = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *',
+    [id]
   );
 
   if (course.rows.length === 0) {
@@ -474,7 +474,7 @@ exports.updateCoursePricing = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: course.rows[0],
+    data: normalizeCoursePricing(course.rows[0]),
     message: 'Course pricing updated successfully'
   });
 });
@@ -1121,8 +1121,7 @@ exports.getInstructorProfile = asyncHandler(async (req, res) => {
     SELECT 
       u.*,
       COUNT(c.id) as total_courses,
-      COUNT(e.id) as total_enrollments,
-      AVG(c.price) as avg_course_price
+      COUNT(e.id) as total_enrollments
     FROM users u
     LEFT JOIN courses c ON u.id = c.instructor_id
     LEFT JOIN enrollments e ON c.id = e.course_id
@@ -1619,13 +1618,12 @@ exports.getTopCourses = asyncHandler(async (req, res) => {
       c.id,
       c.title,
       c.category,
-      c.price,
       COUNT(DISTINCT e.id) as enrollment_count,
       COUNT(DISTINCT l.id) as lesson_count
     FROM courses c
     LEFT JOIN enrollments e ON c.id = e.course_id
     LEFT JOIN lessons l ON c.id = l.course_id
-    GROUP BY c.id, c.title, c.category, c.price
+    GROUP BY c.id, c.title, c.category
     ORDER BY enrollment_count DESC
     LIMIT $1
   `, [limit]);
@@ -1653,7 +1651,6 @@ exports.getCourseReports = asyncHandler(async (req, res) => {
       c.title,
       c.category,
       c.level,
-      c.price,
       COUNT(DISTINCT e.id) as total_enrollments,
       COUNT(DISTINCT l.id) as total_lessons,
       ROUND(
@@ -1666,7 +1663,7 @@ exports.getCourseReports = asyncHandler(async (req, res) => {
     LEFT JOIN enrollments e ON c.id = e.course_id
     LEFT JOIN lessons l ON c.id = l.course_id
     LEFT JOIN progress lp ON l.id = lp.lesson_id
-    GROUP BY c.id, c.title, c.category, c.level, c.price
+    GROUP BY c.id, c.title, c.category, c.level
     ORDER BY total_enrollments DESC
   `);
 

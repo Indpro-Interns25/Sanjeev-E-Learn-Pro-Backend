@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
-const { Server } = require('socket.io');
 require('dotenv').config();
+const activityLogMiddleware = require('./middleware/activityLogMiddleware');
+const { initializeSchema } = require('./services/schemaInitializer');
+const { initializeSocket } = require('./services/socketService');
 
 const app = express();
 
@@ -88,6 +90,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Persist activity logs for successful API requests.
+app.use(activityLogMiddleware);
+
 // Basic endpoints for testing
 app.get('/health', (req, res) => {
   console.log('✅ Health endpoint accessed');
@@ -127,6 +132,7 @@ app.get('/test', (req, res) => {
 // Import and use routes
 const routes = require('./routes');
 const { login, register, validateToken } = require('./controllers/authController');
+const statsController = require('./controllers/statsController');
 
 // Add direct API routes that frontend expects
 app.post('/auth/login', login);
@@ -152,6 +158,9 @@ app.post('/auth/forgot-password', (req, res) => {
     message: 'Password reset email sent (feature not implemented yet)'
   });
 });
+
+// Public real-time stats endpoint used by frontend dashboard cards.
+app.get('/stats', statsController.getPublicStats);
 
 // Additional direct routes for compatibility
 app.post('/api/login', login);
@@ -200,108 +209,65 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 3002;
 const HOST = '0.0.0.0'; // Bind to all interfaces
 
-const server = app.listen(PORT, HOST, () => {
-  console.log('\n🚀 ================================');
-  console.log('✅ E-LEARN PRO BACKEND STARTED!');
-  console.log('🚀 ================================');
-  console.log(`📍 Server URL: http://localhost:${PORT}`);
-  console.log(`📍 Server Host: ${HOST}:${PORT}`);
-  console.log(`📍 Process ID: ${process.pid}`);
-  console.log('\n🔗 Frontend Expected Endpoints:');
-  console.log(`   � Login: http://localhost:${PORT}/auth/login`);
-  console.log(`   📝 Register: http://localhost:${PORT}/auth/register`);
-  console.log(`   � Profile: http://localhost:${PORT}/auth/me`);
-  console.log(`   � Logout: http://localhost:${PORT}/auth/logout`);
-  console.log(`   � Reset Password: http://localhost:${PORT}/auth/forgot-password`);
-  console.log('\n� Additional API Endpoints:');
-  console.log(`   � Health: http://localhost:${PORT}/health`);
-  console.log(`   🧪 Test: http://localhost:${PORT}/test`);
-  console.log(`   � Alt Login: http://localhost:${PORT}/api/login`);
-  console.log(`   � Alt Register: http://localhost:${PORT}/api/register`);
-  console.log('\n🌐 Alternative URLs:');
-  console.log(`   http://127.0.0.1:${PORT}`);
-  console.log(`   http://localhost:${PORT}`);
-  console.log('🚀 ================================\n');
-});
+let server;
+let io;
 
-// Initialize Socket.IO with CORS configuration
-const io = new Server(server, {
-  cors: {
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'],
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
+async function startServer() {
+  try {
+    await initializeSchema();
 
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log(`🔌 Socket.IO: Client connected - ${socket.id}`);
-  
-  // Handle room joining (for course-specific chat)
-  socket.on('join-course', (courseId) => {
-    socket.join(`course-${courseId}`);
-    console.log(`📚 Socket ${socket.id} joined course ${courseId}`);
-    socket.emit('joined-course', courseId);
-  });
-  
-  // Handle leaving room
-  socket.on('leave-course', (courseId) => {
-    socket.leave(`course-${courseId}`);
-    console.log(`🚪 Socket ${socket.id} left course ${courseId}`);
-  });
-  
-  // Handle chat messages
-  socket.on('chat-message', (data) => {
-    const { courseId, message, user } = data;
-    console.log(`💬 Chat message in course ${courseId} from ${user?.name || 'Anonymous'}`);
-    
-    // Broadcast to all users in the course room
-    io.to(`course-${courseId}`).emit('chat-message', {
-      id: Date.now(),
-      message,
-      user,
-      timestamp: new Date().toISOString()
+    server = app.listen(PORT, HOST, () => {
+      console.log('\n🚀 ================================');
+      console.log('✅ E-LEARN PRO BACKEND STARTED!');
+      console.log('🚀 ================================');
+      console.log(`📍 Server URL: http://localhost:${PORT}`);
+      console.log(`📍 Server Host: ${HOST}:${PORT}`);
+      console.log(`📍 Process ID: ${process.pid}`);
+      console.log('\n🔗 Frontend Expected Endpoints:');
+      console.log(`   Login: http://localhost:${PORT}/auth/login`);
+      console.log(`   Register: http://localhost:${PORT}/auth/register`);
+      console.log(`   Profile: http://localhost:${PORT}/auth/me`);
+      console.log(`   Logout: http://localhost:${PORT}/auth/logout`);
+      console.log(`   Reset Password: http://localhost:${PORT}/auth/forgot-password`);
+      console.log('\n📡 Real-time Features Enabled:');
+      console.log('   Authenticated Socket.io chat, notifications, and WebRTC signaling');
+      console.log('🚀 ================================\n');
     });
-  });
-  
-  // Handle typing indicator
-  socket.on('typing', (data) => {
-    const { courseId, user } = data;
-    socket.to(`course-${courseId}`).emit('user-typing', { user });
-  });
-  
-  socket.on('stop-typing', (data) => {
-    const { courseId, user } = data;
-    socket.to(`course-${courseId}`).emit('user-stopped-typing', { user });
-  });
-  
-  // Handle disconnect
-  socket.on('disconnect', () => {
-    console.log(`🔌 Socket.IO: Client disconnected - ${socket.id}`);
-  });
-});
 
-console.log('✅ Socket.IO initialized for real-time features\n');
+    io = initializeSocket(server);
+    app.set('io', io);
+    console.log('✅ Authenticated Socket.IO initialized');
 
-// Enhanced error handling
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use!`);
-    console.log('💡 Try using a different port or kill existing processes:');
-    console.log('   taskkill /f /im node.exe');
-    process.exit(1);
-  } else if (err.code === 'EACCES') {
-    console.error(`❌ Permission denied to bind to port ${PORT}`);
-    console.log('💡 Try using a port > 1024 or run as administrator');
-    process.exit(1);
-  } else {
-    console.error('❌ Server failed to start:', err);
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use!`);
+        console.log('💡 Try using a different port or kill existing processes:');
+        console.log('   taskkill /f /im node.exe');
+        process.exit(1);
+      } else if (err.code === 'EACCES') {
+        console.error(`❌ Permission denied to bind to port ${PORT}`);
+        console.log('💡 Try using a port > 1024 or run as administrator');
+        process.exit(1);
+      } else {
+        console.error('❌ Server failed to start:', err);
+        process.exit(1);
+      }
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize server:', error);
     process.exit(1);
   }
-});
+}
+
+startServer();
 
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
+  if (!server) {
+    process.exit(0);
+    return;
+  }
+
   console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
   server.close(() => {
     console.log('✅ Server closed successfully');

@@ -8,16 +8,19 @@ class CourseModel {
       instructor_id, 
       category, 
       level, 
-      price, 
       duration, 
       status, 
       thumbnail, 
-      preview_video 
+      preview_video,
+      is_free
     } = courseData;
     
     const { rows } = await pool.query(
-      'INSERT INTO courses (title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-      [title, description, instructor_id, category, level, price, duration, status, thumbnail, preview_video]
+      `INSERT INTO courses 
+       (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, is_free) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       RETURNING *`,
+      [title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, true]
     );
     return rows[0];
   }

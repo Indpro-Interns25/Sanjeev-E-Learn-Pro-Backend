@@ -7,7 +7,7 @@ This guide will help you populate your LMS database with 20 professionally curat
 - **20 Complete Courses** across 13 categories
 - **110+ Video Lectures** with YouTube URLs
 - Professional thumbnails from Unsplash
-- All courses are **FREE** (price = 0)
+- All courses are **FREE** (`isFree: true`)
 - Ready-to-use content for demos and testing
 
 ## 🚀 Quick Start (3 Steps)

@@ -2,21 +2,71 @@ const Lesson = require('../models/lessonModel');
 const Course = require('../models/courseModel');
 const asyncHandler = require('../utils/asyncHandler');
 const { formatDurationForDB, formatDurationForForm } = require('../utils/durationHelper');
+const pool = require('../db');
+
+async function canAccessCourse(user, courseId) {
+  if (user.role === 'admin') return true;
+
+  if (user.role === 'instructor') {
+    const owned = await pool.query('SELECT id FROM courses WHERE id = $1 AND instructor_id = $2', [courseId, user.id]);
+    return owned.rows.length > 0;
+  }
+
+  const enrolled = await pool.query(
+    'SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+    [user.id, courseId]
+  );
+  return enrolled.rows.length > 0;
+}
+
+async function canManageCourse(user, courseId) {
+  if (user.role === 'admin') return true;
+  if (user.role !== 'instructor') return false;
+
+  const owned = await pool.query('SELECT id FROM courses WHERE id = $1 AND instructor_id = $2', [courseId, user.id]);
+  return owned.rows.length > 0;
+}
 
 // Get all lessons (for general API access)
 exports.getAllLessons = asyncHandler(async (req, res) => {
-  const pool = require('../db');
-  
-  const lessons = await pool.query(`
-    SELECT 
-      l.*,
-      c.title as course_title,
-      u.name as instructor_name
-    FROM lessons l
-    JOIN courses c ON l.course_id = c.id
-    LEFT JOIN users u ON c.instructor_id = u.id
-    ORDER BY l.course_id, l.order_index, l.id
-  `);
+  let lessons;
+
+  if (req.user.role === 'admin') {
+    lessons = await pool.query(`
+      SELECT 
+        l.*,
+        c.title as course_title,
+        u.name as instructor_name
+      FROM lessons l
+      JOIN courses c ON l.course_id = c.id
+      LEFT JOIN users u ON c.instructor_id = u.id
+      ORDER BY l.course_id, l.order_index, l.id
+    `);
+  } else if (req.user.role === 'instructor') {
+    lessons = await pool.query(`
+      SELECT 
+        l.*,
+        c.title as course_title,
+        u.name as instructor_name
+      FROM lessons l
+      JOIN courses c ON l.course_id = c.id
+      LEFT JOIN users u ON c.instructor_id = u.id
+      WHERE c.instructor_id = $1
+      ORDER BY l.course_id, l.order_index, l.id
+    `, [req.user.id]);
+  } else {
+    lessons = await pool.query(`
+      SELECT 
+        l.*,
+        c.title as course_title,
+        u.name as instructor_name
+      FROM lessons l
+      JOIN courses c ON l.course_id = c.id
+      JOIN enrollments e ON e.course_id = c.id AND e.user_id = $1 AND e.is_active = true
+      LEFT JOIN users u ON c.instructor_id = u.id
+      ORDER BY l.course_id, l.order_index, l.id
+    `, [req.user.id]);
+  }
 
   // Format durations for frontend display
   const formattedLessons = lessons.rows.map(lesson => ({
@@ -33,6 +83,9 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
 
 exports.listByCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
+  const allowed = await canAccessCourse(req.user, courseId);
+  if (!allowed) return res.status(403).json({ error: 'Forbidden: course not accessible' });
+
   const lessons = await Lesson.findByCourse(courseId);
   res.json(lessons);
 });
@@ -59,6 +112,9 @@ exports.create = asyncHandler(async (req, res) => {
   // Verify course exists
   const course = await Course.findById(course_id);
   if (!course) return res.status(404).json({ error: 'Course not found' });
+
+  const canManage = await canManageCourse(req.user, course_id);
+  if (!canManage) return res.status(403).json({ error: 'Forbidden: cannot manage lessons for this course' });
 
   // Prefer content field but allow description
   const finalContent = content || description || '';
@@ -90,6 +146,10 @@ exports.getLessonById = asyncHandler(async (req, res) => {
   
   const lesson = await Lesson.findById(id);
   if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+  const allowed = await canAccessCourse(req.user, lesson.course_id);
+  if (!allowed) return res.status(403).json({ error: 'Forbidden: lesson not accessible' });
+
   res.json(lesson);
 });
 
@@ -107,6 +167,9 @@ exports.updateLesson = asyncHandler(async (req, res) => {
 
   const existing = await Lesson.findById(id);
   if (!existing) return res.status(404).json({ error: 'Lesson not found' });
+
+  const canManage = await canManageCourse(req.user, existing.course_id);
+  if (!canManage) return res.status(403).json({ error: 'Forbidden: cannot update this lesson' });
 
   // Update the lesson using direct database query to handle all fields including course_id
   const pool = require('../db');
@@ -135,6 +198,9 @@ exports.getCurriculum = asyncHandler(async (req, res) => {
   // Verify course exists
   const course = await Course.findById(courseId);
   if (!course) return res.status(404).json({ error: 'Course not found' });
+
+  const allowed = await canAccessCourse(req.user, courseId);
+  if (!allowed) return res.status(403).json({ error: 'Forbidden: course not accessible' });
   
   const lessons = await Lesson.findByCourse(courseId);
   
@@ -149,6 +215,9 @@ exports.remove = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const existing = await Lesson.findById(id);
   if (!existing) return res.status(404).json({ error: 'Lesson not found' });
+
+  const canManage = await canManageCourse(req.user, existing.course_id);
+  if (!canManage) return res.status(403).json({ error: 'Forbidden: cannot delete this lesson' });
   
   await Lesson.remove(id);
   res.status(204).send();
@@ -157,7 +226,12 @@ exports.remove = asyncHandler(async (req, res) => {
 // GET /api/lessons/:lessonId/comments
 exports.getLessonComments = asyncHandler(async (req, res) => {
   const lessonId = parseInt(req.params.lessonId || req.params.id, 10);
-  const pool = require('../db');
+  const lesson = await Lesson.findById(lessonId);
+  if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+  const allowed = await canAccessCourse(req.user, lesson.course_id);
+  if (!allowed) return res.status(403).json({ error: 'Forbidden: lesson not accessible' });
+
   const result = await pool.query(`
     SELECT c.*, u.name as author_name, u.email as author_email
     FROM comments c
@@ -171,12 +245,18 @@ exports.getLessonComments = asyncHandler(async (req, res) => {
 // POST /api/lessons/:lessonId/comments
 exports.addLessonComment = asyncHandler(async (req, res) => {
   const lessonId = parseInt(req.params.lessonId || req.params.id, 10);
-  const { user_id, content, course_id } = req.body;
-  if (!user_id || !content) return res.status(400).json({ error: 'user_id and content are required' });
-  const pool = require('../db');
+  const { content, course_id } = req.body;
+  if (!content) return res.status(400).json({ error: 'content is required' });
+
+  const lesson = await Lesson.findById(lessonId);
+  if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+  const allowed = await canAccessCourse(req.user, lesson.course_id);
+  if (!allowed) return res.status(403).json({ error: 'Forbidden: lesson not accessible' });
+
   const result = await pool.query(
     'INSERT INTO comments (lesson_id, course_id, user_id, content) VALUES ($1, $2, $3, $4) RETURNING *',
-    [lessonId, course_id || null, user_id, content]
+    [lessonId, course_id || lesson.course_id, req.user.id, content]
   );
   res.status(201).json({ success: true, data: result.rows[0] });
 });

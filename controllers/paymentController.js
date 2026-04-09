@@ -10,7 +10,7 @@ exports.createOrder = asyncHandler(async (req, res) => {
   }
 
   // Verify course exists
-  const course = await pool.query('SELECT id, title, price FROM courses WHERE id = $1', [course_id]);
+  const course = await pool.query('SELECT id, title, is_free FROM courses WHERE id = $1', [course_id]);
   if (course.rows.length === 0) {
     return res.status(404).json({ error: 'Course not found' });
   }

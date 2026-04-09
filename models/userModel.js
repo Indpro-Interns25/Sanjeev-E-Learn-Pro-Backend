@@ -12,8 +12,16 @@ class UserModel {
     const { rows } = await pool.query('SELECT * FROM users WHERE id=$1', [id]);
     return rows[0] || null;
   }
+  static async findByIdSafe(id) {
+    const { rows } = await pool.query('SELECT id, name, email, role, created_at FROM users WHERE id=$1', [id]);
+    return rows[0] || null;
+  }
   static async findAll() {
     const { rows } = await pool.query('SELECT * FROM users ORDER BY created_at DESC');
+    return rows;
+  }
+  static async findAllSafe() {
+    const { rows } = await pool.query('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC');
     return rows;
   }
   static async findByEmail(email) {
