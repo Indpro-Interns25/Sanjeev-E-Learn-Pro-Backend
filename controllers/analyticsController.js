@@ -14,7 +14,7 @@ exports.getPlatformAnalytics = asyncHandler(async (req, res) => {
       FROM activity_logs
       WHERE created_at >= NOW() - INTERVAL '30 days' AND user_id IS NOT NULL
     `),
-    pool.query('SELECT COUNT(*)::int AS total_enrollments FROM enrollments WHERE is_active = true'),
+    pool.query('SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int AS total_enrollments FROM users'),
     pool.query(
       `SELECT
          up.course_id,

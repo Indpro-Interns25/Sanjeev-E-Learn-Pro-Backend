@@ -26,7 +26,7 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       (SELECT COUNT(*) FROM users WHERE role = 'instructor') as total_instructors,
       (SELECT COUNT(*) FROM courses) as total_courses,
       (SELECT COUNT(*) FROM lessons) as total_lessons,
-      (SELECT COUNT(*) FROM enrollments) as total_enrollments,
+      (SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int FROM users) as total_enrollments,
       (SELECT COUNT(*) FROM users WHERE role = 'student') as pending_students,
       (SELECT COUNT(*) FROM users WHERE role = 'instructor') as pending_instructors,
       (SELECT COUNT(*) FROM courses) as pending_courses
@@ -664,32 +664,31 @@ exports.getAllStudents = asyncHandler(async (req, res) => {
     whereClause += ` AND (u.name ILIKE $${params.length} OR u.email ILIKE $${params.length})`;
   }
 
+  if (status) {
+    params.push(status.toLowerCase());
+    whereClause += ` AND COALESCE(u.status, 'active') = $${params.length}`;
+  }
+
   const students = await pool.query(`
     SELECT 
-      u.*,
-      COUNT(DISTINCT e.id) as enrolled_courses,
-      COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.id END) as completed_lessons,
-      CASE 
-        WHEN COUNT(DISTINCT e.id) > 0 THEN 'active'
-        ELSE 'pending'
-      END as status
+      u.id,
+      u.name,
+      u.email,
+      COALESCE(u.status, 'active') as status,
+      COALESCE(
+        ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id) FILTER (WHERE e.course_id IS NOT NULL),
+        '{}'::integer[]
+      ) as "enrolledCourses"
     FROM users u
-    LEFT JOIN enrollments e ON u.id = e.user_id
-    LEFT JOIN progress lp ON u.id = lp.user_id
+    LEFT JOIN enrollments e ON u.id = e.user_id AND e.is_active = true
     ${whereClause}
-    GROUP BY u.id
+    GROUP BY u.id, u.name, u.email, u.status
     ORDER BY u.id DESC
   `, params);
 
-  // Filter by status if provided (using virtual status)
-  let filteredStudents = students.rows;
-  if (status) {
-    filteredStudents = students.rows.filter(student => student.status === status);
-  }
-
   res.json({
     success: true,
-    data: filteredStudents
+    data: students.rows
   });
 });
 
@@ -717,102 +716,6 @@ exports.approveStudent = asyncHandler(async (req, res) => {
   });
 });
 
-// Create a new student (admin)
-exports.createStudent = asyncHandler(async (req, res) => {
-  const { name, email, password, status = 'active' } = req.body;
-
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email and password are required' });
-  }
-
-  // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ error: 'Invalid email format' });
-  }
-
-  // Check if email exists
-  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
-  if (existing.rows.length > 0) {
-    return res.status(409).json({ error: 'Email already exists' });
-  }
-
-  const bcrypt = require('bcrypt');
-  const saltRounds = 12;
-  const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-  const result = await pool.query(
-    'INSERT INTO users (name, email, password, role, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id, name, email, role, status, created_at',
-    [name.trim(), email.toLowerCase().trim(), hashedPassword, 'student', status]
-  );
-
-  res.status(201).json({ success: true, data: result.rows[0], message: 'Student created successfully' });
-});
-
-// Update an existing student (admin)
-exports.updateStudent = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { name, email, password, status } = req.body;
-
-  const studentId = parseInt(id, 10);
-  if (isNaN(studentId) || studentId <= 0) {
-    return res.status(400).json({ error: 'Invalid student ID' });
-  }
-
-  // Check if student exists
-  const existing = await pool.query('SELECT * FROM users WHERE id = $1 AND role = $2', [studentId, 'student']);
-  if (existing.rows.length === 0) {
-    return res.status(404).json({ error: 'Student not found' });
-  }
-
-  const updates = [];
-  const values = [];
-  let idx = 1;
-
-  if (name !== undefined) { updates.push(`name = $${idx++}`); values.push(name); }
-  if (email !== undefined) { updates.push(`email = $${idx++}`); values.push(email.toLowerCase().trim()); }
-
-  // Only include status if the column exists in the database
-  if (status !== undefined) {
-    const hasStatus = await columnExists('users', 'status');
-    if (!hasStatus) {
-      return res.status(500).json({ error: 'Database schema missing `users.status` column. Please run migrations: node scripts/admin-migrate.js' });
-    }
-    updates.push(`status = $${idx++}`);
-    values.push(status);
-  }
-  if (password !== undefined) {
-    const bcrypt = require('bcrypt');
-    const saltRounds = 12;
-    const hashed = await bcrypt.hash(password, saltRounds);
-    updates.push(`password = $${idx++}`);
-    values.push(hashed);
-  }
-
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields provided for update' });
-  }
-
-  // Only set updated_at if the column exists
-  const hasUpdatedAt = await columnExists('users', 'updated_at');
-  if (hasUpdatedAt) updates.push('updated_at = NOW()');
-  // Build RETURNING fields conditionally based on schema
-  const hasStatusInReturn = await columnExists('users', 'status');
-  const returningFields = ['id', 'name', 'email', 'role'];
-  if (hasStatusInReturn) returningFields.push('status');
-  if (hasUpdatedAt) returningFields.push('updated_at');
-  const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${idx} AND role = $${idx + 1} RETURNING ${returningFields.join(', ')}`;
-  values.push(studentId);
-  values.push('student');
-
-  const result = await pool.query(query, values);
-  if (result.rows.length === 0) {
-    return res.status(404).json({ error: 'Student not found' });
-  }
-
-  res.json({ success: true, data: result.rows[0], message: 'Student updated successfully' });
-});
-
 // Delete a student (admin)
 exports.deleteStudent = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -829,6 +732,117 @@ exports.deleteStudent = asyncHandler(async (req, res) => {
   await pool.query('DELETE FROM users WHERE id = $1 AND role = $2', [studentId, 'student']);
 
   res.json({ success: true, message: `Student deleted successfully (${existing.rows[0].name})` });
+});
+
+exports.toggleStudentStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const studentId = parseInt(id, 10);
+
+  if (isNaN(studentId) || studentId <= 0) {
+    return res.status(400).json({ error: 'Invalid student ID' });
+  }
+
+  const existing = await pool.query(
+    'SELECT id, name, email, COALESCE(status, \'active\') AS status FROM users WHERE id = $1 AND role = $2',
+    [studentId, 'student']
+  );
+
+  if (existing.rows.length === 0) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  let nextStatus = existing.rows[0].status === 'blocked' ? 'active' : 'blocked';
+  if (status !== undefined) {
+    const normalized = String(status).toLowerCase();
+    if (!['active', 'blocked'].includes(normalized)) {
+      return res.status(400).json({ error: 'status must be active or blocked' });
+    }
+    nextStatus = normalized;
+  }
+
+  const updated = await pool.query(
+    'UPDATE users SET status = $1 WHERE id = $2 AND role = $3 RETURNING id, name, email, status',
+    [nextStatus, studentId, 'student']
+  );
+
+  res.json({
+    success: true,
+    data: updated.rows[0],
+    message: `Student ${nextStatus === 'blocked' ? 'blocked' : 'unblocked'} successfully`
+  });
+});
+
+exports.assignCourseToStudent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { courseId } = req.body;
+  const studentId = parseInt(id, 10);
+  const parsedCourseId = parseInt(courseId, 10);
+
+  if (isNaN(studentId) || studentId <= 0) {
+    return res.status(400).json({ error: 'Invalid student ID' });
+  }
+
+  if (isNaN(parsedCourseId) || parsedCourseId <= 0) {
+    return res.status(400).json({ error: 'Valid courseId is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const student = await client.query(
+      'SELECT id, name, email, COALESCE(status, \'active\') AS status, enrolled_courses FROM users WHERE id = $1 AND role = $2 FOR UPDATE',
+      [studentId, 'student']
+    );
+
+    if (student.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const course = await client.query('SELECT id, title FROM courses WHERE id = $1', [parsedCourseId]);
+    if (course.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    await client.query(
+      `INSERT INTO enrollments (user_id, course_id, is_active, enrolled_at)
+       VALUES ($1, $2, true, NOW())
+       ON CONFLICT (user_id, course_id)
+       DO UPDATE SET is_active = true`,
+      [studentId, parsedCourseId]
+    );
+
+    const updatedStudent = await client.query(
+      `UPDATE users
+       SET enrolled_courses = CASE
+         WHEN enrolled_courses IS NULL THEN ARRAY[$2]::integer[]
+         WHEN NOT ($2 = ANY(enrolled_courses)) THEN array_append(enrolled_courses, $2)
+         ELSE enrolled_courses
+       END
+       WHERE id = $1 AND role = $3
+       RETURNING id, name, email, COALESCE(status, 'active') AS status, enrolled_courses`,
+      [studentId, parsedCourseId, 'student']
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      data: {
+        student: updatedStudent.rows[0],
+        course: course.rows[0]
+      },
+      message: 'Course assigned successfully'
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 exports.rejectStudent = asyncHandler(async (req, res) => {

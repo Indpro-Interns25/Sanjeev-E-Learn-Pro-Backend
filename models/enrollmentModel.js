@@ -3,7 +3,7 @@ const pool = require('../db');
 class EnrollmentModel {
   static async enroll({ user_id, course_id }) {
     const { rows } = await pool.query(
-      'INSERT INTO enrollments (user_id, course_id, is_active, progress) VALUES ($1, $2, true, 0) ON CONFLICT (user_id, course_id) DO UPDATE SET is_active = true RETURNING *',
+      'INSERT INTO enrollments (user_id, course_id, is_active, enrolled_at) VALUES ($1, $2, true, NOW()) ON CONFLICT (user_id, course_id) DO UPDATE SET is_active = true RETURNING *',
       [user_id, course_id]
     );
     return rows[0] || null;

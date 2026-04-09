@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { validateToken } = require('../middleware/authMiddleware');
+const { allowRoles } = require('../middleware/rbacMiddleware');
 const { login } = require('../controllers/authController');
 const adminController = require('../controllers/adminController');
 
@@ -14,19 +15,10 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Middleware to check admin role
-const requireAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-};
-
 // Apply authentication and admin check to protected routes only
 const protectedRoutes = express.Router();
 protectedRoutes.use(validateToken);
-protectedRoutes.use(requireAdmin);
+protectedRoutes.use(allowRoles('admin'));
 
 // Dashboard & Analytics
 protectedRoutes.get('/dashboard/stats', adminController.getDashboardStats);
@@ -60,20 +52,10 @@ protectedRoutes.post('/lessons/reorder', adminController.reorderLessons);
 
 // Student Management
 protectedRoutes.get('/students', adminController.getAllStudents);
-// Create a new student (admin)
-protectedRoutes.post('/students', adminController.createStudent);
-// Update an existing student (admin)
-protectedRoutes.put('/students/:id', adminController.updateStudent);
 // Delete a student (admin)
 protectedRoutes.delete('/students/:id', adminController.deleteStudent);
-// Also accept singular path variants under /api/admin
-protectedRoutes.put('/student/:id', adminController.updateStudent);
-protectedRoutes.delete('/student/:id', adminController.deleteStudent);
-protectedRoutes.patch('/students/:id/approve', adminController.approveStudent);
-protectedRoutes.patch('/students/:id/reject', adminController.rejectStudent);
-protectedRoutes.patch('/students/:id/suspend', adminController.suspendStudent);
-protectedRoutes.patch('/students/:id/activate', adminController.activateStudent);
-protectedRoutes.get('/students/:id/progress', adminController.getStudentProgress);
+protectedRoutes.patch('/students/:id/status', adminController.toggleStudentStatus);
+protectedRoutes.post('/students/:id/assign-course', adminController.assignCourseToStudent);
 
 // Instructor Management
 protectedRoutes.get('/instructors', adminController.getAllInstructors);

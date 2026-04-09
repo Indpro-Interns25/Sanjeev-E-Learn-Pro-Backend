@@ -47,6 +47,13 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     `;
     const completedLessons = await pool.query(completedLessonsQuery, [userId]);
 
+    // Get total enrollments across all users using the enrolled_courses array
+    const totalEnrollmentsQuery = `
+      SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int as count
+      FROM users
+    `;
+    const totalEnrollments = await pool.query(totalEnrollmentsQuery);
+
     // Get user's enrolled courses with progress
     const userCoursesQuery = `
       SELECT 
@@ -85,7 +92,8 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
         coursesInProgress: parseInt(coursesInProgress.rows[0]?.count || 0),
         completedCourses: parseInt(completedCourses.rows[0]?.count || 0),
         totalLessons: parseInt(totalLessons.rows[0]?.count || 0),
-        completedLessons: parseInt(completedLessons.rows[0]?.count || 0)
+        completedLessons: parseInt(completedLessons.rows[0]?.count || 0),
+        totalEnrollments: parseInt(totalEnrollments.rows[0]?.count || 0)
       },
       courses: userCourses.rows.map(course => ({
         ...course,

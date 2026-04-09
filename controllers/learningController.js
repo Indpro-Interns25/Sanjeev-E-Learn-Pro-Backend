@@ -113,5 +113,16 @@ exports.enrollInCourse = asyncHandler(async (req, res) => {
     [userId, courseId]
   );
 
+  await pool.query(
+    `UPDATE users
+     SET enrolled_courses = CASE
+       WHEN enrolled_courses IS NULL THEN ARRAY[$2]::integer[]
+       WHEN NOT ($2 = ANY(enrolled_courses)) THEN array_append(enrolled_courses, $2)
+       ELSE enrolled_courses
+     END
+     WHERE id = $1 AND role = 'student'`,
+    [userId, courseId]
+  );
+
   res.status(201).json({ success: true, data: enrollment.rows[0] });
 });

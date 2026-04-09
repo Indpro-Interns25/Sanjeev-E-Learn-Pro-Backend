@@ -6,6 +6,40 @@ async function initializeSchema() {
   if (initialized) return;
 
   await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS enrolled_courses INTEGER[] NOT NULL DEFAULT '{}'::integer[];
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    DROP CONSTRAINT IF EXISTS users_status_check;
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD CONSTRAINT users_status_check
+    CHECK (status IN ('active', 'blocked'));
+  `);
+
+  await pool.query(`
+    UPDATE users u
+    SET enrolled_courses = COALESCE(
+      (
+        SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+        FROM enrollments e
+        WHERE e.user_id = u.id AND e.is_active = true
+      ),
+      '{}'::integer[]
+    )
+    WHERE u.role = 'student';
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS enrollments (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

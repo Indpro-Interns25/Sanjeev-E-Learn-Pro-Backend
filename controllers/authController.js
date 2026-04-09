@@ -21,6 +21,10 @@ exports.login = asyncHandler(async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
+  if (user.status === 'blocked') {
+    return res.status(403).json({ error: 'Account is blocked' });
+  }
+
   // Check password
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
@@ -66,6 +70,10 @@ exports.adminLogin = asyncHandler(async (req, res) => {
   // Try to find admin user in database
   const adminUser = await User.findByEmail(adminName + '@admin.com');
   if (adminUser && adminUser.role === 'admin') {
+    if (adminUser.status === 'blocked') {
+      return res.status(403).json({ error: 'Account is blocked' });
+    }
+
     const isPasswordValid = await bcrypt.compare(password, adminUser.password);
     if (isPasswordValid) {
       const payload = { id: adminUser.id, email: adminUser.email, role: adminUser.role };
@@ -91,14 +99,14 @@ exports.register = asyncHandler(async (req, res) => {
     url: req.url
   });
   
-  const { email, password, name, role } = req.body;
+  const { email, password, name } = req.body;
   
   try {
     // Input validation
-    if (!email || !password || !name || !role) {
+    if (!email || !password || !name) {
       return res.status(400).json({ 
         error: 'All fields are required',
-        message: 'Please provide email, password, name, and role' 
+        message: 'Please provide email, password, and name' 
       });
     }
 
@@ -116,15 +124,6 @@ exports.register = asyncHandler(async (req, res) => {
       return res.status(400).json({ 
         error: 'Password too short',
         message: 'Password must be at least 6 characters long' 
-      });
-    }
-
-    // Validate role
-    const validRoles = ['student', 'instructor', 'admin'];
-    if (!validRoles.includes(role)) {
-      return res.status(400).json({ 
-        error: 'Invalid role',
-        message: 'Role must be student, instructor, or admin' 
       });
     }
 
@@ -146,7 +145,9 @@ exports.register = asyncHandler(async (req, res) => {
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       name: name.trim(),
-      role: role.toLowerCase()
+      role: 'student',
+      status: 'active',
+      enrolledCourses: []
     };
 
     const user = await User.create(userData);
@@ -161,7 +162,8 @@ exports.register = asyncHandler(async (req, res) => {
     const payload = { 
       id: user.id, 
       email: user.email, 
-      role: user.role 
+      role: user.role,
+      status: user.status
     };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
@@ -173,6 +175,7 @@ exports.register = asyncHandler(async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        status: user.status,
         created_at: user.created_at
       },
       token
@@ -228,6 +231,10 @@ exports.validateToken = asyncHandler(async (req, res, next) => {
     
     if (!user) {
       return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    if (user.status === 'blocked') {
+      return res.status(403).json({ error: 'Account is blocked' });
     }
     
     req.user = user;

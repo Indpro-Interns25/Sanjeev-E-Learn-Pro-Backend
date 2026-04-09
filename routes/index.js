@@ -62,9 +62,7 @@ router.use('/chat', chatRoutes);
 router.use('/notifications', notificationRoutes);
 
 // Accept common frontend path variants for student edit/delete and forward to admin handlers
-router.put('/students/:id', validateToken, requireAdmin, adminController.updateStudent);
 router.delete('/students/:id', validateToken, requireAdmin, adminController.deleteStudent);
-router.put('/student/:id', validateToken, requireAdmin, adminController.updateStudent);
 router.delete('/student/:id', validateToken, requireAdmin, adminController.deleteStudent);
 
 // Protected aliases so frontend can call common top-level paths with admin token

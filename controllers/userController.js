@@ -1,3 +1,4 @@
+const pool = require('../db');
 const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
 const bcrypt = require('bcrypt');
@@ -31,10 +32,15 @@ exports.create = asyncHandler(async (req, res) => {
 
   const { email, name, password, role } = req.body;
   if (!email || !name || !password || !role) return res.status(400).json({ error: 'email, name, password, and role required' });
+
+  if (role === 'student') {
+    return res.status(403).json({ error: 'Students must register themselves' });
+  }
+
   const existing = await User.findByEmail(email);
   if (existing) return res.status(409).json({ error: 'Email already exists' });
   const hashed = await bcrypt.hash(password, 10);
-  const created = await User.create({ email, name, password: hashed, role });
+  const created = await User.create({ email, name, password: hashed, role, status: 'active', enrolledCourses: [] });
   console.log("created");
   res.status(201).json("created");
 });
@@ -58,7 +64,7 @@ exports.getEnrolledCourses = asyncHandler(async (req, res) => {
   if (!userId) return res.status(400).json({ error: 'user_id required' });
 
   const result = await pool.query(`
-    SELECT c.*, e.enrolled_at, e.progress, e.completed_at
+    SELECT c.*, e.enrolled_at, e.is_active
     FROM courses c
     JOIN enrollments e ON c.id = e.course_id
     WHERE e.user_id = $1 AND e.is_active = true

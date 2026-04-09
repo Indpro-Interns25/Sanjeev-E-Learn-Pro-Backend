@@ -14,6 +14,16 @@ async function migrateLmsProduction() {
     `);
 
     await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS enrolled_courses INTEGER[] NOT NULL DEFAULT '{}'::integer[];
+    `);
+
+    await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -28,6 +38,35 @@ async function migrateLmsProduction() {
       END;
       $$;
     `);
+
+    await client.query(`
+      UPDATE users u
+      SET enrolled_courses = COALESCE(
+        (
+          SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+          FROM enrollments e
+          WHERE e.user_id = u.id AND e.is_active = true
+        ),
+        '{}'::integer[]
+      )
+      WHERE u.role = 'student';
+    `);
+
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'users_status_check'
+          ) THEN
+            ALTER TABLE users
+            ADD CONSTRAINT users_status_check
+            CHECK (status IN ('active', 'blocked'));
+          END IF;
+        END;
+        $$;
+      `);
 
     await client.query(`
       ALTER TABLE courses

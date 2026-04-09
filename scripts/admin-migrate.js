@@ -9,11 +9,11 @@ const pool = require('../db');
   try {
     await client.query('BEGIN');
 
-    // Add status column to users table if it doesn't exist
+    // Add status and enrolled course columns to users table if they don't exist
     console.log('📋 Adding status columns to users table...');
     await client.query(`
       ALTER TABLE users 
-      ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'
     `);
 
     await client.query(`
@@ -26,6 +26,11 @@ const pool = require('../db');
       ADD COLUMN IF NOT EXISTS suspension_reason TEXT
     `);
 
+    await client.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS enrolled_courses INTEGER[] NOT NULL DEFAULT '{}'::integer[]
+    `);
+
     // Add check constraint for user status
     await client.query(`
       ALTER TABLE users 
@@ -35,7 +40,26 @@ const pool = require('../db');
     await client.query(`
       ALTER TABLE users 
       ADD CONSTRAINT users_status_check 
-      CHECK (status IN ('pending', 'active', 'suspended', 'rejected'))
+      CHECK (status IN ('active', 'blocked'))
+    `);
+
+    await client.query(`
+      UPDATE users u
+      SET enrolled_courses = COALESCE(
+        (
+          SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+          FROM enrollments e
+          WHERE e.user_id = u.id AND e.is_active = true
+        ),
+        '{}'::integer[]
+      )
+      WHERE u.role = 'student'
+    `);
+
+    await client.query(`
+      UPDATE users
+      SET status = 'blocked'
+      WHERE status IN ('pending', 'suspended', 'rejected')
     `);
 
     // Add instructor_id and status to courses table
@@ -218,6 +242,7 @@ const pool = require('../db');
     // Show summary
     console.log('\n📊 Migration Summary:');
     console.log('✅ Added status management to users');
+    console.log('✅ Added enrolled course tracking to users');
     console.log('✅ Enhanced courses table with pricing and categories');
     console.log('✅ Added lesson status management');
     console.log('✅ Created categories system');

@@ -23,39 +23,71 @@ async function ensureCourseOwnershipIfInstructor(req, courseId) {
 exports.enroll = asyncHandler(async (req, res) => {
   const { user_id, course_id } = req.body;
   const targetUserId = resolveTargetUserId(req, user_id);
-  if (!targetUserId || !course_id) return res.status(400).json({ error: 'course_id required' });
+  const parsedCourseId = parseInt(course_id, 10);
+
+  if (!targetUserId || !parsedCourseId) return res.status(400).json({ error: 'course_id required' });
   
-  // Verify course exists before attempting enrollment
-  const courseCheck = await pool.query('SELECT id, title FROM courses WHERE id = $1', [course_id]);
+  // Verify course and student exist before attempting enrollment
+  const [courseCheck, userCheck] = await Promise.all([
+    pool.query('SELECT id, title FROM courses WHERE id = $1', [parsedCourseId]),
+    pool.query('SELECT id, role FROM users WHERE id = $1', [targetUserId])
+  ]);
   
   if (courseCheck.rows.length === 0) {
     return res.status(404).json({ 
       error: 'Course not found',
-      message: `Course with ID ${course_id} does not exist. Please refresh the page to get updated course list.`,
-      course_id: course_id
+      message: `Course with ID ${parsedCourseId} does not exist. Please refresh the page to get updated course list.`,
+      course_id: parsedCourseId
     });
   }
-  
-  const result = await Enrollment.enroll({ user_id: targetUserId, course_id });
-  
-  if (!result) {
-    // Already enrolled, but let's make sure it's active
-    const existing = await pool.query(
-      'UPDATE enrollments SET is_active = true WHERE user_id = $1 AND course_id = $2 RETURNING *',
-      [targetUserId, course_id]
+
+  if (userCheck.rows.length === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (userCheck.rows[0].role !== 'student') {
+    return res.status(400).json({ error: 'Only students can be enrolled in courses' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const existingEnrollment = await client.query(
+      'SELECT id, is_active FROM enrollments WHERE user_id = $1 AND course_id = $2',
+      [targetUserId, parsedCourseId]
     );
-    return res.status(200).json({ 
-      message: 'Already enrolled', 
-      enrollment: existing.rows[0],
-      alreadyEnrolled: true 
+
+    const result = await client.query(
+      'INSERT INTO enrollments (user_id, course_id, is_active, enrolled_at) VALUES ($1, $2, true, NOW()) ON CONFLICT (user_id, course_id) DO UPDATE SET is_active = true RETURNING *',
+      [targetUserId, parsedCourseId]
+    );
+
+    await client.query(
+      `UPDATE users
+       SET enrolled_courses = CASE
+         WHEN enrolled_courses IS NULL THEN ARRAY[$2]::integer[]
+         WHEN NOT ($2 = ANY(enrolled_courses)) THEN array_append(enrolled_courses, $2)
+         ELSE enrolled_courses
+       END
+       WHERE id = $1 AND role = 'student'`,
+      [targetUserId, parsedCourseId]
+    );
+
+    await client.query('COMMIT');
+
+    return res.status(existingEnrollment.rows[0]?.is_active ? 200 : 201).json({ 
+      message: existingEnrollment.rows[0]?.is_active ? 'Already enrolled' : 'Enrollment successful',
+      enrollment: result.rows[0],
+      alreadyEnrolled: !!existingEnrollment.rows[0]?.is_active
     });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-  
-  res.status(201).json({ 
-    message: 'Enrollment successful',
-    enrollment: result,
-    alreadyEnrolled: false
-  });
 });
 
 exports.listUser = asyncHandler(async (req, res) => {
@@ -116,15 +148,35 @@ exports.listCourse = asyncHandler(async (req, res) => {
 exports.unenroll = asyncHandler(async (req, res) => {
   const { user_id, course_id } = req.body;
   const targetUserId = resolveTargetUserId(req, user_id);
-  if (!targetUserId || !course_id) return res.status(400).json({ error: 'course_id required' });
+  const parsedCourseId = parseInt(course_id, 10);
+  if (!targetUserId || !parsedCourseId) return res.status(400).json({ error: 'course_id required' });
 
   if (req.user.role === 'instructor') {
-    const allowed = await ensureCourseOwnershipIfInstructor(req, parseInt(course_id, 10));
+    const allowed = await ensureCourseOwnershipIfInstructor(req, parsedCourseId);
     if (!allowed) {
       return res.status(403).json({ error: 'Forbidden: not instructor of this course' });
     }
   }
 
-  await Enrollment.unenroll({ user_id: targetUserId, course_id });
-  res.status(204).send();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query('DELETE FROM enrollments WHERE user_id = $1 AND course_id = $2', [targetUserId, parsedCourseId]);
+    await client.query(
+      `UPDATE users
+       SET enrolled_courses = array_remove(COALESCE(enrolled_courses, '{}'::integer[]), $2)
+       WHERE id = $1 AND role = 'student'`,
+      [targetUserId, parsedCourseId]
+    );
+
+    await client.query('COMMIT');
+    res.status(204).send();
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 });

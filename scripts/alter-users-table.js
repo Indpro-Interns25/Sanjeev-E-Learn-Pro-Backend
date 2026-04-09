@@ -20,6 +20,16 @@ const pool = require('../db');
       ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'student';
     `);
 
+    await client.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
+    `);
+
+    await client.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS enrolled_courses INTEGER[] NOT NULL DEFAULT '{}'::integer[];
+    `);
+
     // Add check constraint for role if it doesn't exist
     await client.query(`
       ALTER TABLE users 
@@ -29,6 +39,16 @@ const pool = require('../db');
     await client.query(`
       ALTER TABLE users 
       ADD CONSTRAINT users_role_check CHECK (role IN ('student', 'instructor', 'admin'));
+    `);
+
+    await client.query(`
+      ALTER TABLE users 
+      DROP CONSTRAINT IF EXISTS users_status_check;
+    `);
+
+    await client.query(`
+      ALTER TABLE users 
+      ADD CONSTRAINT users_status_check CHECK (status IN ('active', 'blocked'));
     `);
 
     await client.query('COMMIT');

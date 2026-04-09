@@ -79,12 +79,19 @@ exports.getStats = asyncHandler(async (req, res) => {
   const totalCourses = coursesResult.rows[0]?.total || 0;
   const averageRating = parseFloat(ratingResult.rows[0]?.average_rating || 0);
 
+  const enrollmentsResult = await pool.query(`
+    SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int as total
+    FROM users
+  `);
+  const totalEnrollments = enrollmentsResult.rows[0]?.total || 0;
+
   res.json({
     success: true,
     data: {
       totalUsers,
       totalCourses,
-      averageRating: Math.round(averageRating * 10) / 10 // Round to 1 decimal place
+      averageRating: Math.round(averageRating * 10) / 10, // Round to 1 decimal place
+      totalEnrollments
     }
   });
 });
@@ -168,8 +175,8 @@ exports.getDetailedStats = asyncHandler(async (req, res) => {
     
     // Total enrollments
     pool.query(`
-      SELECT COUNT(*)::int as total 
-      FROM enrollments
+      SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int as total 
+      FROM users
     `),
     
     // Total feedback submissions
