@@ -40,8 +40,7 @@ exports.create = asyncHandler(async (req, res) => {
   const existing = await User.findByEmail(email);
   if (existing) return res.status(409).json({ error: 'Email already exists' });
   const hashed = await bcrypt.hash(password, 10);
-  const created = await User.create({ email, name, password: hashed, role, status: 'active', enrolledCourses: [] });
-  console.log("created");
+  await User.create({ email, name, password: hashed, role, status: 'active', enrolledCourses: [] });
   res.status(201).json("created");
 });
 

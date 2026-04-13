@@ -2,10 +2,16 @@ const asyncHandler = require('../utils/asyncHandler');
 const pool = require('../db');
 const QuizSystem = require('../models/quizSystemModel');
 const UserProgress = require('../models/userProgressModel');
+const Assessment = require('../models/assessmentModel');
+const LessonProgress = require('../models/lessonProgressModel');
 
 function validateQuizPayload(questions) {
   if (!Array.isArray(questions) || questions.length === 0) {
     return 'questions must be a non-empty array';
+  }
+
+  if (questions.length < 10) {
+    return 'At least 10 questions are required for a quiz';
   }
 
   for (const question of questions) {
@@ -87,7 +93,9 @@ exports.getQuizByCourse = asyncHandler(async (req, res) => {
       id: quiz.id,
       course_id: quiz.course_id,
       title: quiz.title,
-      questions: safeQuestions
+      questions: safeQuestions,
+      availableQuestions: quiz.available_questions || safeQuestions.length,
+      returnedQuestions: safeQuestions.length
     }
   });
 });
@@ -122,7 +130,7 @@ exports.submitQuiz = asyncHandler(async (req, res) => {
     });
   }
 
-  const quiz = await QuizSystem.getQuizByCourseId(courseId);
+  const quiz = await QuizSystem.getQuizByCourseId(courseId, { forSubmission: true });
   if (!quiz) {
     return res.status(404).json({ success: false, message: 'Quiz not found for this course' });
   }
@@ -183,4 +191,129 @@ exports.getUserResult = asyncHandler(async (req, res) => {
   }
 
   res.json({ success: true, data: result });
+});
+
+exports.getLessonQuiz = asyncHandler(async (req, res) => {
+  const lessonId = parseInt(req.params.lessonId, 10);
+  const userId = req.user.id;
+
+  if (!lessonId || Number.isNaN(lessonId)) {
+    return res.status(400).json({ success: false, message: 'Valid lessonId is required', data: null });
+  }
+
+  const lesson = await Assessment.getLessonById(lessonId);
+  if (!lesson) {
+    return res.status(404).json({ success: false, message: 'Lesson not found', data: null });
+  }
+
+  const isEnrolled = await Assessment.isUserEnrolledInCourse(userId, lesson.course_id);
+  if (!isEnrolled) {
+    return res.status(403).json({ success: false, message: 'Only enrolled users can access lesson quizzes', data: null });
+  }
+
+  const isUnlocked = await Assessment.isLessonUnlocked(userId, lesson.course_id, lessonId);
+  if (!isUnlocked) {
+    return res.status(400).json({ success: false, message: 'Complete previous lesson before taking this quiz', data: null });
+  }
+
+  // IMPORTANT: Check if lesson is completed (quiz unlock requirement)
+  const lessonCompleted = await LessonProgress.isLessonCompleted(userId, lessonId);
+  if (!lessonCompleted) {
+    return res.status(403).json({
+      success: false,
+      message: 'Complete the lesson first to access quiz',
+      data: null
+    });
+  }
+
+  const questions = await Assessment.getLessonQuizQuestions(lessonId);
+  const totalAvailable = await Assessment.countLessonQuizQuestions(lessonId);
+  if (questions.length === 0) {
+    return res.status(404).json({ success: false, message: 'Lesson quiz not found', data: null });
+  }
+
+  res.json({
+    success: true,
+    message: 'Lesson quiz fetched successfully',
+    data: {
+      lessonId,
+      courseId: lesson.course_id,
+      questions,
+      availableQuestions: totalAvailable,
+      returnedQuestions: questions.length
+    }
+  });
+});
+
+exports.submitLessonQuiz = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { lessonId, answers = [] } = req.body;
+  const parsedLessonId = parseInt(lessonId, 10);
+
+  if (!parsedLessonId || Number.isNaN(parsedLessonId)) {
+    return res.status(400).json({ success: false, message: 'Valid lessonId is required', data: null });
+  }
+
+  if (!Array.isArray(answers)) {
+    return res.status(400).json({ success: false, message: 'answers must be an array', data: null });
+  }
+
+  const lesson = await Assessment.getLessonById(parsedLessonId);
+  if (!lesson) {
+    return res.status(404).json({ success: false, message: 'Lesson not found', data: null });
+  }
+
+  const isEnrolled = await Assessment.isUserEnrolledInCourse(userId, lesson.course_id);
+  if (!isEnrolled) {
+    return res.status(403).json({ success: false, message: 'Only enrolled users can submit lesson quizzes', data: null });
+  }
+
+  const isUnlocked = await Assessment.isLessonUnlocked(userId, lesson.course_id, parsedLessonId);
+  if (!isUnlocked) {
+    return res.status(400).json({ success: false, message: 'Complete previous lesson before taking this quiz', data: null });
+  }
+
+  // IMPORTANT: Check if lesson is completed (quiz unlock requirement)
+  const lessonCompleted = await LessonProgress.isLessonCompleted(userId, parsedLessonId);
+  if (!lessonCompleted) {
+    return res.status(403).json({
+      success: false,
+      message: 'Complete the lesson first to access quiz',
+      data: null
+    });
+  }
+
+  const questions = await Assessment.getLessonQuizQuestions(parsedLessonId);
+  if (questions.length === 0) {
+    return res.status(404).json({ success: false, message: 'Lesson quiz not found', data: null });
+  }
+
+  const result = await Assessment.gradeLessonQuiz(parsedLessonId, answers);
+
+  await Assessment.saveLessonQuizAttempt(userId, parsedLessonId);
+
+  const progressState = await UserProgress.getLessonProgressState(userId, parsedLessonId);
+  const shouldComplete = (progressState.watchedTime || 0) > 0;
+  if (shouldComplete) {
+    await UserProgress.upsertProgress({
+      userId,
+      courseId: lesson.course_id,
+      lectureId: parsedLessonId,
+      completed: true,
+      watchedTime: progressState.watchedTime
+    });
+  }
+
+  res.json({
+    success: true,
+    message: 'Lesson quiz submitted successfully',
+    data: {
+      lessonId: parsedLessonId,
+      courseId: lesson.course_id,
+      attempted: true,
+      score: result.score,
+      totalQuestions: result.total,
+      lessonCompleted: shouldComplete
+    }
+  });
 });

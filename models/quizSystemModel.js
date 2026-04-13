@@ -1,5 +1,11 @@
 const pool = require('../db');
 
+function getRandomQuestionCount(totalCount) {
+  if (totalCount < 10) return totalCount;
+  const max = Math.min(20, totalCount);
+  return Math.floor(Math.random() * (max - 10 + 1)) + 10;
+}
+
 class QuizSystemModel {
   static async upsertQuiz({ courseId, title, createdBy, questions }) {
     const client = await pool.connect();
@@ -47,16 +53,36 @@ class QuizSystemModel {
     }
   }
 
-  static async getQuizByCourseId(courseId) {
+  static async getQuizByCourseId(courseId, options = {}) {
+    const { forSubmission = false } = options;
     const quizRes = await pool.query('SELECT id, course_id, title FROM quizzes WHERE course_id = $1', [courseId]);
     if (quizRes.rows.length === 0) return null;
 
     const quiz = quizRes.rows[0];
 
-    const questionsRes = await pool.query(
-      'SELECT id, question_text FROM questions WHERE quiz_id = $1 ORDER BY id',
+    const countRes = await pool.query(
+      'SELECT COUNT(*)::int AS total FROM questions WHERE quiz_id = $1',
       [quiz.id]
     );
+    const total = countRes.rows[0]?.total || 0;
+
+    if (total === 0) {
+      return {
+        ...quiz,
+        questions: [],
+        available_questions: 0
+      };
+    }
+
+    const questionsRes = forSubmission
+      ? await pool.query(
+        'SELECT id, question_text FROM questions WHERE quiz_id = $1 ORDER BY id',
+        [quiz.id]
+      )
+      : await pool.query(
+        'SELECT id, question_text FROM questions WHERE quiz_id = $1 ORDER BY RANDOM() LIMIT $2',
+        [quiz.id, getRandomQuestionCount(total)]
+      );
 
     const questions = [];
     for (const question of questionsRes.rows) {
@@ -74,7 +100,8 @@ class QuizSystemModel {
 
     return {
       ...quiz,
-      questions
+      questions,
+      available_questions: total
     };
   }
 

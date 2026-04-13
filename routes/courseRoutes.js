@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const courseController = require('../controllers/courseController');
 const lessonController = require('../controllers/lessonController');
+const quizSystemController = require('../controllers/quizSystemController');
 const { validateToken } = require('../middleware/authMiddleware');
 const { allowRoles } = require('../middleware/rbacMiddleware');
 
@@ -24,6 +25,10 @@ router.get('/:courseId/lectures/:lectureId', validateToken, lessonController.get
 
 // Lesson comments
 router.post('/:courseId/lessons/:lessonId/comments', validateToken, courseController.addLessonComment);
+router.get('/:courseId/lessons/:lessonId/comments', validateToken, lessonController.getLessonComments);
+
+// Lesson quiz
+router.get('/:courseId/lessons/:lessonId/quiz', validateToken, quizSystemController.getLessonQuiz);
 
 // Course comments
 router.get('/:courseId/comments', validateToken, courseController.getCourseComments);

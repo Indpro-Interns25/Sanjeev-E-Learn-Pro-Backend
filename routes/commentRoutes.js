@@ -3,6 +3,9 @@ const router = express.Router();
 const commentController = require('../controllers/commentController');
 const { validateToken } = require('../middleware/authMiddleware');
 
+// GET /api/comments?courseId=X&lessonId=Y - Get comments by course and lesson (query-based)
+router.get('/', validateToken, commentController.getCommentsByQuery);
+
 // GET /api/comments/:commentId/replies - Get replies for a comment
 router.get('/:commentId/replies', validateToken, commentController.getReplies);
 

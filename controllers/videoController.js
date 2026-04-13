@@ -182,3 +182,107 @@ exports.streamLessonVideo = asyncHandler(async (req, res) => {
 
   videoResponse.data.pipe(res);
 });
+
+// POST /api/video-progress
+// Save or update video progress (watching time)
+// Body: { lecture_id, user_id, current_time, duration, progress_percentage }
+exports.saveVideoProgress = asyncHandler(async (req, res) => {
+  const { lecture_id, user_id, current_time, duration, progress_percentage } = req.body;
+
+  if (!lecture_id || !user_id || current_time === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: 'lecture_id, user_id, and current_time are required'
+    });
+  }
+
+  // Verify lecture exists
+  const lesson = await pool.query('SELECT id, course_id FROM lessons WHERE id = $1', [lecture_id]);
+  if (lesson.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Lesson not found' });
+  }
+
+  const courseId = lesson.rows[0].course_id;
+
+  // Verify user is enrolled in the course or is admin/instructor
+  const isPrivileged = req.user.role === 'admin' || req.user.role === 'instructor';
+  if (!isPrivileged) {
+    const enrollment = await pool.query(
+      'SELECT 1 FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+      [user_id, courseId]
+    );
+    if (enrollment.rows.length === 0) {
+      return res.status(403).json({ success: false, message: 'Forbidden: not enrolled in this course' });
+    }
+  }
+
+  // Save or update video progress
+  const result = await pool.query(
+    `INSERT INTO user_progress (user_id, lesson_id, course_id, watched_time, total_duration)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, lesson_id) 
+     DO UPDATE SET watched_time = $4, total_duration = $5, updated_at = CURRENT_TIMESTAMP
+     RETURNING *`,
+    [user_id, lecture_id, courseId, current_time || 0, duration || 0]
+  );
+
+  res.json({
+    success: true,
+    message: 'Video progress saved',
+    data: result.rows[0]
+  });
+});
+
+// GET /api/video-progress/:lectureId/:userId
+// Get video progress for a lecture by a user
+exports.getVideoProgress = asyncHandler(async (req, res) => {
+  const lectureId = parseInt(req.params.lectureId, 10);
+  const userId = parseInt(req.params.userId, 10);
+
+  if (isNaN(lectureId) || isNaN(userId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid lectureId or userId'
+    });
+  }
+
+  // Verify lecture exists
+  const lesson = await pool.query('SELECT id, course_id FROM lessons WHERE id = $1', [lectureId]);
+  if (lesson.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Lesson not found' });
+  }
+
+  const courseId = lesson.rows[0].course_id;
+
+  // Verify access (user can view their own progress or admin/instructor can view any)
+  const isPrivileged = req.user.role === 'admin' || req.user.role === 'instructor';
+  if (!isPrivileged && req.user.id !== userId) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+
+  // Get video progress
+  const result = await pool.query(
+    `SELECT user_id, lesson_id, watched_time, total_duration, completed, created_at, updated_at
+     FROM user_progress
+     WHERE lesson_id = $1 AND user_id = $2`,
+    [lectureId, userId]
+  );
+
+  if (result.rows.length === 0) {
+    return res.json({
+      success: true,
+      data: {
+        user_id: userId,
+        lesson_id: lectureId,
+        watched_time: 0,
+        total_duration: 0,
+        completed: false
+      }
+    });
+  }
+
+  res.json({
+    success: true,
+    data: result.rows[0]
+  });
+});

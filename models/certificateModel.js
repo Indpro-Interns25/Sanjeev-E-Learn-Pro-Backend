@@ -10,6 +10,7 @@ function mapCertificateRow(row) {
     userId: row.user_id,
     courseId: row.course_id,
     certificateId: row.certificate_code,
+    score: row.score,
     issuedDate: row.issued_at,
     userName: row.user_name,
     courseName: row.course_name
@@ -45,6 +46,7 @@ class CertificateModel {
          ce.user_id,
          ce.course_id,
          ce.certificate_code,
+        ce.score,
          ce.issued_at,
          u.name AS user_name,
          c.title AS course_name
@@ -66,6 +68,7 @@ class CertificateModel {
          ce.user_id,
          ce.course_id,
          ce.certificate_code,
+        ce.score,
          ce.issued_at,
          u.name AS user_name,
          c.title AS course_name
@@ -82,7 +85,21 @@ class CertificateModel {
 
   static async issueForUserCourse(userId, courseId) {
     const completion = await UserProgress.getCourseCompletion(userId, courseId);
-    if (completion.completionPercentage < 100) {
+    if (!completion.completionReady) {
+      return null;
+    }
+
+    const latestFinalAttempt = await pool.query(
+      `SELECT score, passed
+       FROM final_test_attempts
+       WHERE user_id = $1 AND course_id = $2
+       ORDER BY attempted_at DESC, id DESC
+       LIMIT 1`,
+      [userId, courseId]
+    );
+
+    const finalAttempt = latestFinalAttempt.rows[0];
+    if (!finalAttempt || !finalAttempt.passed || Number(finalAttempt.score) < 70) {
       return null;
     }
 
@@ -100,17 +117,17 @@ class CertificateModel {
         [userId, courseId]
       );
 
-      return existing;
+      return { ...existing, score: finalAttempt.score };
     }
 
     const certificateCode = randomUUID();
     const { rows } = await pool.query(
-      `INSERT INTO certificates (user_id, course_id, certificate_code, issued_at)
-       VALUES ($1, $2, $3, NOW())
+      `INSERT INTO certificates (user_id, course_id, certificate_code, score, issued_at)
+       VALUES ($1, $2, $3, $4, NOW())
        ON CONFLICT (user_id, course_id)
        DO NOTHING
-       RETURNING id, user_id, course_id, certificate_code, issued_at`,
-      [userId, courseId, certificateCode]
+       RETURNING id, user_id, course_id, certificate_code, score, issued_at`,
+      [userId, courseId, certificateCode, finalAttempt.score]
     );
 
     const certificate = mapCertificateRow(rows[0]) || (await this.findByUserCourse(userId, courseId));
@@ -124,6 +141,7 @@ class CertificateModel {
 
     return {
       ...certificate,
+      score: finalAttempt.score,
       userName: context.user_name,
       courseName: context.course_name
     };

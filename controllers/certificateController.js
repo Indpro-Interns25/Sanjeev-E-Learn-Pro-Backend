@@ -21,11 +21,12 @@ exports.generateCertificate = asyncHandler(async (req, res) => {
   if (!certificate) {
     return res.status(403).json({
       success: false,
-      message: 'Certificate can only be generated after full course completion'
+      message: 'Certificate can only be generated after passing final test with at least 70% and completing the course',
+      data: null
     });
   }
 
-  res.status(201).json({ success: true, data: certificate });
+  res.status(201).json({ success: true, message: 'Certificate generated successfully', data: certificate });
 });
 
 exports.getUserCertificates = asyncHandler(async (req, res) => {
@@ -40,7 +41,7 @@ exports.getUserCertificates = asyncHandler(async (req, res) => {
   }
 
   const certificates = await Certificate.findByUser(userId);
-  res.json({ success: true, data: certificates });
+  res.json({ success: true, message: 'Certificates fetched successfully', data: certificates });
 });
 
 exports.getCertificateByCourse = asyncHandler(async (req, res) => {
@@ -54,11 +55,32 @@ exports.getCertificateByCourse = asyncHandler(async (req, res) => {
   if (!certificate) {
     return res.status(403).json({
       success: false,
-      message: 'Certificate is available only after completing the course'
+      message: 'Certificate is available only after passing final test with at least 70%',
+      data: null
     });
   }
 
-  res.json({ success: true, data: certificate });
+  res.json({ success: true, message: 'Certificate fetched successfully', data: certificate });
+});
+
+exports.getCertificateByUserAndCourse = asyncHandler(async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const courseId = parseInt(req.params.courseId, 10);
+
+  if (!userId || Number.isNaN(userId) || !courseId || Number.isNaN(courseId)) {
+    return res.status(400).json({ success: false, message: 'Valid userId and courseId are required', data: null });
+  }
+
+  if (!canAccessUserCertificates(req, userId)) {
+    return res.status(403).json({ success: false, message: 'Forbidden', data: null });
+  }
+
+  const certificate = await Certificate.findByUserCourse(userId, courseId);
+  if (!certificate) {
+    return res.status(404).json({ success: false, message: 'Certificate not found', data: null });
+  }
+
+  res.json({ success: true, message: 'Certificate fetched successfully', data: certificate });
 });
 
 exports.downloadCertificatePdf = asyncHandler(async (req, res) => {
@@ -72,7 +94,8 @@ exports.downloadCertificatePdf = asyncHandler(async (req, res) => {
   if (!certificate) {
     return res.status(403).json({
       success: false,
-      message: 'Certificate is available only after completing the course'
+      message: 'Certificate is available only after passing final test with at least 70%',
+      data: null
     });
   }
 

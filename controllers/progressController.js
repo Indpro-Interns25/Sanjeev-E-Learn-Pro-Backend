@@ -33,7 +33,7 @@ exports.markLectureComplete = asyncHandler(async (req, res) => {
 
   // Verify lecture exists and belongs to course
   const lectureCheck = await pool.query(
-    'SELECT id FROM lessons WHERE id = $1 AND course_id = $2',
+    'SELECT id, order_index FROM lessons WHERE id = $1 AND course_id = $2',
     [lectureId, courseId]
   );
   if (lectureCheck.rows.length === 0) {
@@ -43,11 +43,56 @@ exports.markLectureComplete = asyncHandler(async (req, res) => {
     });
   }
 
+  const enrollmentCheck = await pool.query(
+    'SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+    [userId, courseId]
+  );
+  if (enrollmentCheck.rows.length === 0) {
+    return res.status(403).json({
+      success: false,
+      error: 'Only enrolled users can complete lessons'
+    });
+  }
+
+  const orderedLessons = await pool.query(
+    'SELECT id FROM lessons WHERE course_id = $1 ORDER BY order_index ASC, id ASC',
+    [courseId]
+  );
+  const currentIndex = orderedLessons.rows.findIndex((row) => Number(row.id) === Number(lectureId));
+  if (currentIndex > 0) {
+    const previousLectureId = orderedLessons.rows[currentIndex - 1].id;
+    const previousState = await UserProgress.getLessonProgressState(userId, previousLectureId);
+    if (!previousState.completed) {
+      return res.status(400).json({
+        success: false,
+        error: 'Complete the previous lesson before this one'
+      });
+    }
+  }
+
+  const lessonProgress = await UserProgress.getLessonProgressState(userId, lectureId);
+  if ((lessonProgress.watchedTime || 0) <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Watch the lesson before marking it complete'
+    });
+  }
+
+  const quizAttempted = await UserProgress.hasLessonQuizAttempt(userId, lectureId);
+  if (!quizAttempted) {
+    return res.status(400).json({
+      success: false,
+      error: 'Attempt lesson quiz before marking lesson complete'
+    });
+  }
+
   // Mark lecture as completed
-  const progress = await Progress.markLectureComplete({
-    user_id: userId,
-    course_id: courseId,
-    lecture_id: lectureId
+  const progress = await UserProgress.upsertProgress({
+    userId,
+    courseId,
+    lectureId,
+    completed: true,
+    watchedTime: lessonProgress.watchedTime
   });
 
   const completion = await UserProgress.getCourseCompletion(userId, courseId);
@@ -109,16 +154,27 @@ exports.saveWatchTime = asyncHandler(async (req, res) => {
   }
 
   // Update watch time
-  const progress = await Progress.updateWatchTime({
+  let progress = await Progress.updateWatchTime({
     user_id: userId,
     course_id: courseId,
     lecture_id: lectureId,
     watched_time: parseInt(watchedTime, 10)
   });
 
+  const quizAttempted = await UserProgress.hasLessonQuizAttempt(userId, lectureId);
+  if (quizAttempted && parseInt(watchedTime, 10) > 0) {
+    progress = await UserProgress.upsertProgress({
+      userId,
+      courseId,
+      lectureId,
+      completed: true,
+      watchedTime: parseInt(watchedTime, 10)
+    });
+  }
+
   res.status(200).json({
     success: true,
-    message: 'Watch time saved successfully',
+    message: quizAttempted ? 'Watch time saved and lesson completion updated' : 'Watch time saved successfully',
     data: progress
   });
 });
@@ -252,4 +308,41 @@ exports.deleteProgress = asyncHandler(async (req, res) => {
 
   await Progress.remove(id);
   res.status(204).send();
+});
+
+/**
+ * GET /api/progress/user/:userId/course/:courseId (Admin/Instructor)
+ * Get course progress for a specific user
+ */
+exports.getUserCourseProgress = asyncHandler(async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const courseId = parseInt(req.params.courseId, 10);
+
+  if (isNaN(userId) || isNaN(courseId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid userId or courseId'
+    });
+  }
+
+  // Verify course exists
+  const courseCheck = await pool.query('SELECT id FROM courses WHERE id = $1', [courseId]);
+  if (courseCheck.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      error: 'Course not found'
+    });
+  }
+
+  // Get progress for the user
+  const lectures = await Progress.getCourseProgress(userId, courseId);
+  const progressData = await Progress.calculateCourseProgress(userId, courseId);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      ...progressData,
+      lectures
+    }
+  });
 });

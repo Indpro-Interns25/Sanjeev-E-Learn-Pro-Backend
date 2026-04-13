@@ -92,13 +92,6 @@ exports.adminLogin = asyncHandler(async (req, res) => {
 
 // POST /api/auth/register
 exports.register = asyncHandler(async (req, res) => {
-  console.log('🔥 Registration attempt received:', {
-    body: req.body,
-    headers: req.headers,
-    method: req.method,
-    url: req.url
-  });
-  
   const { email, password, name } = req.body;
   
   try {
@@ -151,12 +144,6 @@ exports.register = asyncHandler(async (req, res) => {
     };
 
     const user = await User.create(userData);
-    console.log('✅ User created successfully in database:', {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role
-    });
 
     // Generate JWT token
     const payload = { 

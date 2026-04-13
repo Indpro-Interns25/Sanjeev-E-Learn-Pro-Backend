@@ -72,3 +72,58 @@ exports.getReplies = asyncHandler(async (req, res) => {
   `, [parentId]);
   res.json({ success: true, data: result.rows });
 });
+
+// GET /api/comments?courseId=X&lessonId=Y - Get comments by course and lesson
+exports.getCommentsByQuery = asyncHandler(async (req, res) => {
+  const courseId = req.query.courseId ? parseInt(req.query.courseId, 10) : null;
+  const lessonId = req.query.lessonId ? parseInt(req.query.lessonId, 10) : null;
+
+  if (!courseId) {
+    return res.status(400).json({ error: 'courseId is required' });
+  }
+
+  // Verify user has access to this course
+  if (req.user.role !== 'admin') {
+    if (req.user.role === 'instructor') {
+      const owned = await pool.query('SELECT id FROM courses WHERE id = $1 AND instructor_id = $2', [courseId, req.user.id]);
+      if (owned.rows.length === 0) {
+        const enrolled = await pool.query(
+          'SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+          [req.user.id, courseId]
+        );
+        if (enrolled.rows.length === 0) {
+          return res.status(403).json({ error: 'Forbidden: cannot access this course' });
+        }
+      }
+    } else {
+      const enrolled = await pool.query(
+        'SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
+        [req.user.id, courseId]
+      );
+      if (enrolled.rows.length === 0) {
+        return res.status(403).json({ error: 'Forbidden: cannot access this course' });
+      }
+    }
+  }
+
+  // Build query based on parameters
+  let query = `
+    SELECT c.*, u.name as author_name, u.email as author_email
+    FROM comments c
+    JOIN users u ON c.user_id = u.id
+    WHERE c.course_id = $1
+  `;
+  const params = [courseId];
+
+  if (lessonId) {
+    query += ' AND c.lesson_id = $2';
+    params.push(lessonId);
+  } else {
+    query += ' AND (c.lesson_id IS NULL OR c.lesson_id = 0)';
+  }
+
+  query += ' ORDER BY c.created_at DESC';
+
+  const result = await pool.query(query, params);
+  res.json({ success: true, data: result.rows });
+});

@@ -12,6 +12,12 @@ exports.createQuiz = asyncHandler(async (req, res) => {
     });
   }
 
+  if (questions.length < 10) {
+    return res.status(400).json({
+      error: 'At least 10 questions are required per quiz'
+    });
+  }
+
   for (const q of questions) {
     if (!q.question || !Array.isArray(q.options) || q.options.length < 2 || !q.correct_answer) {
       return res.status(400).json({
@@ -43,7 +49,15 @@ exports.getQuiz = asyncHandler(async (req, res) => {
     options: q.options
   }));
 
-  res.json({ success: true, data: { ...quiz, questions: safeQuestions } });
+  res.json({
+    success: true,
+    data: {
+      ...quiz,
+      questions: safeQuestions,
+      availableQuestions: quiz.available_questions || safeQuestions.length,
+      returnedQuestions: safeQuestions.length
+    }
+  });
 });
 
 // POST /api/quizzes/:quizId/submit - Submit quiz answers
@@ -56,7 +70,7 @@ exports.submitQuiz = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'answers array is required' });
   }
 
-  const quiz = await Quiz.getQuizWithQuestions(quizId);
+  const quiz = await Quiz.getQuizWithQuestions(quizId, { forSubmission: true });
   if (!quiz) {
     return res.status(404).json({ error: 'Quiz not found' });
   }

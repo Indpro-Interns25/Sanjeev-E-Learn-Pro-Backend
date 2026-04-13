@@ -59,12 +59,32 @@ exports.saveLectureProgress = asyncHandler(async (req, res) => {
     }
   }
 
+  const existingProgress = await UserProgress.getLessonProgressState(userId, lectureId);
+  const resolvedWatchedTime = Math.max(existingProgress.watchedTime || 0, parseInt(watched_time, 10) || 0);
+  const quizAttempted = await UserProgress.hasLessonQuizAttempt(userId, lectureId);
+
+  if (completed && resolvedWatchedTime <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Lesson must be watched before completion'
+    });
+  }
+
+  if (completed && !quizAttempted) {
+    return res.status(400).json({
+      success: false,
+      message: 'Attempt lesson quiz before completion'
+    });
+  }
+
+  const shouldComplete = quizAttempted && resolvedWatchedTime > 0 && (Boolean(completed) || existingProgress.completed);
+
   const progress = await UserProgress.upsertProgress({
     userId,
     courseId,
     lectureId,
-    completed: Boolean(completed),
-    watchedTime: parseInt(watched_time, 10) || 0
+    completed: shouldComplete,
+    watchedTime: resolvedWatchedTime
   });
 
   const completion = await UserProgress.getCourseCompletion(userId, courseId);

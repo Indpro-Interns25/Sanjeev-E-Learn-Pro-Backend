@@ -202,8 +202,6 @@ exports.getCourseById = asyncHandler(async (req, res) => {
     });
   }
 
-  console.log(`🔍 Getting course by ID: ${courseId}`);
-
   const course = await pool.query(`
     SELECT 
       c.*,
@@ -220,14 +218,12 @@ exports.getCourseById = asyncHandler(async (req, res) => {
   `, [courseId]);
 
   if (course.rows.length === 0) {
-    console.log(`❌ Course not found with ID: ${courseId}`);
     return res.status(404).json({ 
       success: false,
       error: `Course with ID ${courseId} not found` 
     });
   }
 
-  console.log(`✅ Course found: ${course.rows[0].title}`);
   res.json({
     success: true,
     data: normalizeCoursePricing(course.rows[0])
@@ -395,14 +391,12 @@ exports.updateCourse = asyncHandler(async (req, res) => {
   const course = await pool.query(query, values);
 
   if (course.rows.length === 0) {
-    console.log(`❌ Course not found for update with ID: ${courseId}`);
     return res.status(404).json({ 
       success: false,
       error: `Course with ID ${courseId} not found` 
     });
   }
 
-  console.log(`✅ Course updated successfully: ${course.rows[0].title}`);
   res.json({
     success: true,
     data: normalizeCoursePricing(course.rows[0]),
@@ -422,12 +416,9 @@ exports.deleteCourse = asyncHandler(async (req, res) => {
     });
   }
 
-  console.log(`🗑️ Deleting course ID: ${courseId}`);
-
   // Check if course exists
   const course = await pool.query('SELECT * FROM courses WHERE id = $1', [courseId]);
   if (course.rows.length === 0) {
-    console.log(`❌ Course not found for deletion with ID: ${courseId}`);
     return res.status(404).json({ 
       success: false,
       error: `Course with ID ${courseId} not found` 
@@ -435,8 +426,6 @@ exports.deleteCourse = asyncHandler(async (req, res) => {
   }
 
   await pool.query('DELETE FROM courses WHERE id = $1', [courseId]);
-
-  console.log(`✅ Course deleted successfully: ${course.rows[0].title}`);
   res.json({
     success: true,
     message: 'Course deleted successfully'
@@ -1044,8 +1033,6 @@ exports.createInstructor = asyncHandler(async (req, res) => {
       VALUES ($1, $2, $3, 'instructor')
       RETURNING id, name, email, role
     `, [name, email, hashedPassword]);
-
-    console.log(`✅ Instructor created successfully: ${name} (${email})`);
 
     res.status(201).json({
       success: true,

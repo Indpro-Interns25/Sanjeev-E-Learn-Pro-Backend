@@ -16,8 +16,6 @@ router.options('*', (req, res) => {
 // GET /auth/users - Get all users (public for testing)
 router.get('/users', async (req, res) => {
   try {
-    console.log('📋 Getting all users...');
-    
     const result = await pool.query(`
       SELECT 
         id, 
@@ -29,9 +27,7 @@ router.get('/users', async (req, res) => {
       FROM users 
       ORDER BY created_at DESC
     `);
-    
-    console.log(`✅ Found ${result.rows.length} users`);
-    
+
     res.json({
       success: true,
       count: result.rows.length,

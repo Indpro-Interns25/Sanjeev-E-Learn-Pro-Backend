@@ -16,6 +16,14 @@ router.post('/complete', validateToken, progressController.markLectureComplete);
 // Body: { courseId, lectureId, watchedTime }
 router.post('/watch', validateToken, progressController.saveWatchTime);
 
+// Specific numeric patterns must come BEFORE generic :courseId patterns
+// GET /api/progress/:userId/course/:courseId
+// Get progress for a specific user and course (admin/instructor only)
+router.get('/:userId/course/:courseId', validateToken, allowRoles('admin', 'instructor'), progressController.getUserCourseProgress);
+
+// GET /api/progress/user/:userId/course/:courseId - Alternative pattern with explicit 'user' prefix
+router.get('/user/:userId/course/:courseId', validateToken, allowRoles('admin', 'instructor'), progressController.getUserCourseProgress);
+
 // GET /api/progress/:courseId
 // Get course progress percentage for current user
 router.get('/:courseId', validateToken, progressController.getCourseProgressPercentage);

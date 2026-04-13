@@ -70,8 +70,56 @@ async function initializeSchema() {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
       certificate_code VARCHAR(120) NOT NULL UNIQUE,
+      score INTEGER,
       issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (user_id, course_id)
+    );
+  `);
+
+  await pool.query(`
+    ALTER TABLE certificates
+    ADD COLUMN IF NOT EXISTS score INTEGER;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lesson_quizzes (
+      id SERIAL PRIMARY KEY,
+      lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      options JSONB NOT NULL,
+      correct_answer TEXT NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lesson_quiz_attempts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+      attempted BOOLEAN NOT NULL DEFAULT true,
+      attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, lesson_id)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS final_tests (
+      id SERIAL PRIMARY KEY,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      options JSONB NOT NULL,
+      correct_answer TEXT NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS final_test_attempts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      score INTEGER NOT NULL,
+      passed BOOLEAN NOT NULL,
+      attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
@@ -218,6 +266,28 @@ async function initializeSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_chat_messages_private_created ON chat_messages(sender_id, recipient_id, created_at DESC);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_user_created ON activity_logs(user_id, created_at DESC);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_quizzes_lesson_id ON lesson_quizzes(lesson_id);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_quiz_attempts_user_lesson ON lesson_quiz_attempts(user_id, lesson_id);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_final_tests_course_id ON final_tests(course_id);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_final_test_attempts_user_course_attempted ON final_test_attempts(user_id, course_id, attempted_at DESC);');
+
+  // Lesson progress tracking for quiz unlock system
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lesson_progress (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+      progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+      completed BOOLEAN NOT NULL DEFAULT false,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, lesson_id)
+    );
+  `);
+
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_user_course ON lesson_progress(user_id, course_id);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_user_lesson ON lesson_progress(user_id, lesson_id);');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_completed ON lesson_progress(completed) WHERE completed = true;');
 
   initialized = true;
 }

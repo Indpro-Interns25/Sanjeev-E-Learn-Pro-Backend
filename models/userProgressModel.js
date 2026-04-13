@@ -30,11 +30,54 @@ class UserProgressModel {
     return rows.map((row) => row.lecture_id);
   }
 
+  static async hasLessonQuizAttempt(userId, lessonId) {
+    const { rows } = await pool.query(
+      `SELECT attempted
+       FROM lesson_quiz_attempts
+       WHERE user_id = $1 AND lesson_id = $2
+       LIMIT 1`,
+      [userId, lessonId]
+    );
+
+    return rows.length > 0 && Boolean(rows[0].attempted);
+  }
+
+  static async getLessonProgressState(userId, lessonId) {
+    const { rows } = await pool.query(
+      `SELECT watched_time, completed
+       FROM user_progress
+       WHERE user_id = $1 AND lecture_id = $2
+       LIMIT 1`,
+      [userId, lessonId]
+    );
+
+    if (!rows[0]) {
+      return { watchedTime: 0, completed: false };
+    }
+
+    return {
+      watchedTime: Number(rows[0].watched_time) || 0,
+      completed: Boolean(rows[0].completed)
+    };
+  }
+
   static async getCourseCompletion(userId, courseId) {
     const { rows } = await pool.query(
       `SELECT
          COUNT(*)::int AS total_lectures,
-         COUNT(*) FILTER (WHERE up.completed = true)::int AS completed_lectures
+         COUNT(*) FILTER (WHERE up.completed = true)::int AS completed_lectures,
+         (
+           SELECT COUNT(DISTINCT lq.lesson_id)::int
+           FROM lesson_quizzes lq
+           JOIN lessons ls ON ls.id = lq.lesson_id
+           WHERE ls.course_id = $2
+         ) AS total_quiz_lessons,
+         (
+           SELECT COUNT(DISTINCT lqa.lesson_id)::int
+           FROM lesson_quiz_attempts lqa
+           JOIN lessons ls ON ls.id = lqa.lesson_id
+           WHERE ls.course_id = $2 AND lqa.user_id = $1 AND lqa.attempted = true
+         ) AS attempted_quiz_lessons
        FROM lessons l
        LEFT JOIN user_progress up ON up.lecture_id = l.id AND up.user_id = $1
        WHERE l.course_id = $2`,
@@ -43,9 +86,29 @@ class UserProgressModel {
 
     const totalLectures = rows[0]?.total_lectures || 0;
     const completedLectures = rows[0]?.completed_lectures || 0;
-    const completionPercentage = totalLectures > 0 ? Math.round((completedLectures / totalLectures) * 100) : 0;
+    const totalQuizLessons = rows[0]?.total_quiz_lessons || 0;
+    const attemptedQuizLessons = rows[0]?.attempted_quiz_lessons || 0;
 
-    return { totalLectures, completedLectures, completionPercentage };
+    const lessonProgress = totalLectures > 0 ? (completedLectures / totalLectures) * 100 : 0;
+    const quizProgress = totalQuizLessons > 0 ? (attemptedQuizLessons / totalQuizLessons) * 100 : 100;
+
+    const completionReady =
+      totalLectures > 0 &&
+      completedLectures >= totalLectures &&
+      attemptedQuizLessons >= totalQuizLessons;
+
+    const completionPercentage = completionReady
+      ? 100
+      : Math.round((lessonProgress + quizProgress) / 2);
+
+    return {
+      totalLectures,
+      completedLectures,
+      totalQuizLessons,
+      attemptedQuizLessons,
+      completionPercentage,
+      completionReady
+    };
   }
 }
 
