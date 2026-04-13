@@ -26,7 +26,24 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       (SELECT COUNT(*) FROM users WHERE role = 'instructor') as total_instructors,
       (SELECT COUNT(*) FROM courses) as total_courses,
       (SELECT COUNT(*) FROM lessons) as total_lessons,
-      (SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int FROM users) as total_enrollments,
+      (
+        WITH synced_students AS (
+          UPDATE users u
+          SET enrolled_courses = COALESCE(
+            (
+              SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+              FROM enrollments e
+              WHERE e.user_id = u.id AND e.is_active = true
+            ),
+            '{}'::integer[]
+          )
+          WHERE u.role = 'student'
+            AND COALESCE(array_length(u.enrolled_courses, 1), 0) = 0
+          RETURNING 1
+        )
+        SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int
+        FROM users
+      ) as total_enrollments,
       (SELECT COUNT(*) FROM users WHERE role = 'student') as pending_students,
       (SELECT COUNT(*) FROM users WHERE role = 'instructor') as pending_instructors,
       (SELECT COUNT(*) FROM courses) as pending_courses
@@ -57,6 +74,10 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
+      totalCourses: stats.rows[0]?.total_courses || 0,
+      totalStudents: stats.rows[0]?.total_students || 0,
+      totalInstructors: stats.rows[0]?.total_instructors || 0,
+      totalEnrollments: stats.rows[0]?.total_enrollments || 0,
       stats: stats.rows[0],
       recentActivity: recentActivity.rows
     }

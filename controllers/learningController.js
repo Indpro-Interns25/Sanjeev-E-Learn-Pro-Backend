@@ -2,6 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const pool = require('../db');
 const Lecture = require('../models/lectureModel');
 const UserProgress = require('../models/userProgressModel');
+const Certificate = require('../models/certificateModel');
 
 exports.getCourseLectures = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
@@ -69,12 +70,7 @@ exports.saveLectureProgress = asyncHandler(async (req, res) => {
   const completion = await UserProgress.getCourseCompletion(userId, courseId);
 
   if (completion.completionPercentage === 100) {
-    await pool.query(
-      `INSERT INTO certificates (user_id, course_id, certificate_code, issued_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_id, course_id) DO NOTHING`,
-      [userId, courseId, `CERT-${courseId}-${userId}`]
-    );
+    await Certificate.issueForUserCourse(userId, courseId);
   }
 
   res.json({

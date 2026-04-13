@@ -14,7 +14,24 @@ exports.getPlatformAnalytics = asyncHandler(async (req, res) => {
       FROM activity_logs
       WHERE created_at >= NOW() - INTERVAL '30 days' AND user_id IS NOT NULL
     `),
-    pool.query('SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int AS total_enrollments FROM users'),
+    pool.query(
+      `WITH synced_students AS (
+         UPDATE users u
+         SET enrolled_courses = COALESCE(
+           (
+             SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+             FROM enrollments e
+             WHERE e.user_id = u.id AND e.is_active = true
+           ),
+           '{}'::integer[]
+         )
+         WHERE u.role = 'student'
+           AND COALESCE(array_length(u.enrolled_courses, 1), 0) = 0
+         RETURNING 1
+       )
+       SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int AS total_enrollments
+       FROM users`
+    ),
     pool.query(
       `SELECT
          up.course_id,

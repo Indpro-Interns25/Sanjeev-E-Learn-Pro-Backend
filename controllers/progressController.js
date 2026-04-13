@@ -1,6 +1,8 @@
 const asyncHandler = require('../utils/asyncHandler');
 const Progress = require('../models/progressModel');
 const pool = require('../db');
+const UserProgress = require('../models/userProgressModel');
+const Certificate = require('../models/certificateModel');
 
 /**
  * POST /api/progress/complete
@@ -47,6 +49,11 @@ exports.markLectureComplete = asyncHandler(async (req, res) => {
     course_id: courseId,
     lecture_id: lectureId
   });
+
+  const completion = await UserProgress.getCourseCompletion(userId, courseId);
+  if (completion.completionPercentage === 100) {
+    await Certificate.issueForUserCourse(userId, courseId);
+  }
 
   res.status(200).json({
     success: true,

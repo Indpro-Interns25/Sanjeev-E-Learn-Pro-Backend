@@ -80,6 +80,20 @@ exports.getStats = asyncHandler(async (req, res) => {
   const averageRating = parseFloat(ratingResult.rows[0]?.average_rating || 0);
 
   const enrollmentsResult = await pool.query(`
+    WITH synced_students AS (
+      UPDATE users u
+      SET enrolled_courses = COALESCE(
+        (
+          SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+          FROM enrollments e
+          WHERE e.user_id = u.id AND e.is_active = true
+        ),
+        '{}'::integer[]
+      )
+      WHERE u.role = 'student'
+        AND COALESCE(array_length(u.enrolled_courses, 1), 0) = 0
+      RETURNING 1
+    )
     SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int as total
     FROM users
   `);
@@ -175,6 +189,20 @@ exports.getDetailedStats = asyncHandler(async (req, res) => {
     
     // Total enrollments
     pool.query(`
+      WITH synced_students AS (
+        UPDATE users u
+        SET enrolled_courses = COALESCE(
+          (
+            SELECT ARRAY_AGG(DISTINCT e.course_id ORDER BY e.course_id)
+            FROM enrollments e
+            WHERE e.user_id = u.id AND e.is_active = true
+          ),
+          '{}'::integer[]
+        )
+        WHERE u.role = 'student'
+          AND COALESCE(array_length(u.enrolled_courses, 1), 0) = 0
+        RETURNING 1
+      )
       SELECT COALESCE(SUM(COALESCE(array_length(enrolled_courses, 1), 0)), 0)::int as total 
       FROM users
     `),

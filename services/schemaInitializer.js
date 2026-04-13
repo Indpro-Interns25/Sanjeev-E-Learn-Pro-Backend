@@ -65,6 +65,17 @@ async function initializeSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS certificates (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      certificate_code VARCHAR(120) NOT NULL UNIQUE,
+      issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, course_id)
+    );
+  `);
+
+  await pool.query(`
     ALTER TABLE courses
     ADD COLUMN IF NOT EXISTS instructor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
   `);

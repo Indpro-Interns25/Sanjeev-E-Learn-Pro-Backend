@@ -1,70 +1,83 @@
 const asyncHandler = require('../utils/asyncHandler');
 const PDFDocument = require('pdfkit');
-const pool = require('../db');
-const UserProgress = require('../models/userProgressModel');
+const Certificate = require('../models/certificateModel');
 
-exports.downloadCertificate = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
+function courseIdFromRequest(req) {
+  return parseInt(req.params.courseId || req.body.courseId, 10);
+}
+
+function canAccessUserCertificates(req, userId) {
+  return req.user.role === 'admin' || req.user.id === userId;
+}
+
+exports.generateCertificate = asyncHandler(async (req, res) => {
+  const courseId = courseIdFromRequest(req);
+
+  if (!courseId || Number.isNaN(courseId)) {
+    return res.status(400).json({ success: false, message: 'Valid courseId is required' });
+  }
+
+  const certificate = await Certificate.issueForUserCourse(req.user.id, courseId);
+  if (!certificate) {
+    return res.status(403).json({
+      success: false,
+      message: 'Certificate can only be generated after full course completion'
+    });
+  }
+
+  res.status(201).json({ success: true, data: certificate });
+});
+
+exports.getUserCertificates = asyncHandler(async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+
+  if (!userId || Number.isNaN(userId)) {
+    return res.status(400).json({ success: false, message: 'Valid userId is required' });
+  }
+
+  if (!canAccessUserCertificates(req, userId)) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+
+  const certificates = await Certificate.findByUser(userId);
+  res.json({ success: true, data: certificates });
+});
+
+exports.getCertificateByCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
 
   if (!courseId || Number.isNaN(courseId)) {
     return res.status(400).json({ success: false, message: 'Valid courseId is required' });
   }
 
-  const completion = await UserProgress.getCourseCompletion(userId, courseId);
-  if (completion.completionPercentage < 100) {
-    return res.status(400).json({
-      success: false,
-      message: 'Certificate is available only after 100% completion'
-    });
-  }
-
-  // Quiz must be completed for this course before certificate generation.
-  const quizCompletion = await pool.query(
-    `SELECT 1
-     FROM quiz_results qr
-     LEFT JOIN quizzes q ON q.id = qr.quiz_id
-     WHERE qr.user_id = $1
-       AND (qr.course_id = $2 OR q.course_id = $2)
-     LIMIT 1`,
-    [userId, courseId]
-  );
-
-  if (quizCompletion.rows.length === 0) {
+  const certificate = await Certificate.issueForUserCourse(req.user.id, courseId);
+  if (!certificate) {
     return res.status(403).json({
       success: false,
-      message: 'Certificate is available only after completing the course quiz'
+      message: 'Certificate is available only after completing the course'
     });
   }
 
-  const userCourse = await pool.query(
-    `SELECT u.name AS user_name, c.title AS course_title
-     FROM users u
-     JOIN courses c ON c.id = $2
-     WHERE u.id = $1`,
-    [userId, courseId]
-  );
+  res.json({ success: true, data: certificate });
+});
 
-  if (userCourse.rows.length === 0) {
-    return res.status(404).json({ success: false, message: 'User or course not found' });
+exports.downloadCertificatePdf = asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.courseId, 10);
+
+  if (!courseId || Number.isNaN(courseId)) {
+    return res.status(400).json({ success: false, message: 'Valid courseId is required' });
   }
 
-  const certificateCode = `CERT-${courseId}-${userId}`;
-  const certificateResult = await pool.query(
-    `INSERT INTO certificates (user_id, course_id, certificate_code, issued_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (user_id, course_id)
-     DO UPDATE SET issued_at = certificates.issued_at
-     RETURNING id, issued_at`,
-    [userId, courseId, certificateCode]
-  );
-
-  const { user_name: userName, course_title: courseTitle } = userCourse.rows[0];
-  const { id: certificateId, issued_at: issuedAt } = certificateResult.rows[0];
-  const completionDate = new Date(issuedAt).toISOString().slice(0, 10);
+  const certificate = await Certificate.issueForUserCourse(req.user.id, courseId);
+  if (!certificate) {
+    return res.status(403).json({
+      success: false,
+      message: 'Certificate is available only after completing the course'
+    });
+  }
 
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename=certificate-course-${courseId}.pdf`);
+  res.setHeader('Content-Disposition', `attachment; filename=certificate-${courseId}.pdf`);
 
   const doc = new PDFDocument({ size: 'A4', margin: 50 });
   doc.pipe(res);
@@ -74,14 +87,14 @@ exports.downloadCertificate = asyncHandler(async (req, res) => {
   doc.moveDown(2);
   doc.fontSize(14).text('This certifies that', { align: 'center' });
   doc.moveDown();
-  doc.fontSize(24).text(userName, { align: 'center' });
+  doc.fontSize(24).text(certificate.userName, { align: 'center' });
   doc.moveDown();
   doc.fontSize(14).text('has successfully completed the course', { align: 'center' });
   doc.moveDown();
-  doc.fontSize(20).text(courseTitle, { align: 'center' });
+  doc.fontSize(20).text(certificate.courseName, { align: 'center' });
   doc.moveDown(2);
-  doc.fontSize(12).text(`Certificate ID: CERT-${certificateId}-${courseId}-${userId}`, { align: 'center' });
-  doc.text(`Completion Date: ${completionDate}`, { align: 'center' });
+  doc.fontSize(12).text(`Certificate ID: ${certificate.certificateId}`, { align: 'center' });
+  doc.text(`Issued Date: ${new Date(certificate.issuedDate).toISOString().slice(0, 10)}`, { align: 'center' });
 
   doc.end();
 });
