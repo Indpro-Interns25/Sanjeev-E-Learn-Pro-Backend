@@ -134,6 +134,11 @@ async function initializeSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE courses
+    ADD COLUMN IF NOT EXISTS youtube_playlist_id VARCHAR(255);
+  `);
+
+  await pool.query(`
     UPDATE courses
     SET is_free = true
     WHERE is_free IS DISTINCT FROM true;
@@ -156,6 +161,12 @@ async function initializeSchema() {
     ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     ADD COLUMN IF NOT EXISTS course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
     ADD COLUMN IF NOT EXISTS lecture_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE;
+  `);
+
+  await pool.query(`
+    ALTER TABLE lessons
+    ADD COLUMN IF NOT EXISTS video_url TEXT,
+    ADD COLUMN IF NOT EXISTS youtube_video_id VARCHAR(64);
   `);
 
   await pool.query(`
@@ -270,6 +281,7 @@ async function initializeSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_quiz_attempts_user_lesson ON lesson_quiz_attempts(user_id, lesson_id);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_final_tests_course_id ON final_tests(course_id);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_final_test_attempts_user_course_attempted ON final_test_attempts(user_id, course_id, attempted_at DESC);');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_courses_unique_youtube_playlist_id ON courses(youtube_playlist_id) WHERE youtube_playlist_id IS NOT NULL;');
 
   // Lesson progress tracking for quiz unlock system
   await pool.query(`
@@ -284,6 +296,37 @@ async function initializeSchema() {
       UNIQUE (user_id, lesson_id)
     );
   `);
+
+  // Ensure all columns exist in lesson_progress table (for existing tables)
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS user_id INTEGER NOT NULL DEFAULT 0 REFERENCES users(id) ON DELETE CASCADE;
+  `);
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS course_id INTEGER NOT NULL DEFAULT 0 REFERENCES courses(id) ON DELETE CASCADE;
+  `);
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS lesson_id INTEGER NOT NULL DEFAULT 0 REFERENCES lessons(id) ON DELETE CASCADE;
+  `);
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100);
+  `);
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS completed BOOLEAN NOT NULL DEFAULT false;
+  `);
+  await pool.query(`
+    ALTER TABLE lesson_progress
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  `);
+
+  // Drop and recreate indexes to ensure they reference correct columns
+  await pool.query('DROP INDEX IF EXISTS idx_lesson_progress_user_course CASCADE;');
+  await pool.query('DROP INDEX IF EXISTS idx_lesson_progress_user_lesson CASCADE;');
+  await pool.query('DROP INDEX IF EXISTS idx_lesson_progress_completed CASCADE;');
 
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_user_course ON lesson_progress(user_id, course_id);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_user_lesson ON lesson_progress(user_id, lesson_id);');

@@ -269,6 +269,74 @@ class AssessmentModel {
 
     return rows[0] || null;
   }
+
+  /**
+   * Get all lessons in a course that have quizzes
+   */
+  static async getCourseLessonsWithQuizzes(courseId) {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT l.id, l.title, l.order_index
+       FROM lessons l
+       INNER JOIN lesson_quizzes lq ON l.id = lq.lesson_id
+       WHERE l.course_id = $1
+       ORDER BY l.order_index ASC`,
+      [courseId]
+    );
+
+    return rows;
+  }
+
+  /**
+   * Count lessons in a course that have quizzes
+   */
+  static async countLessonsWithQuizzes(courseId) {
+    const { rows } = await pool.query(
+      `SELECT COUNT(DISTINCT l.id)::int AS total
+       FROM lessons l
+       INNER JOIN lesson_quizzes lq ON l.id = lq.lesson_id
+       WHERE l.course_id = $1`,
+      [courseId]
+    );
+
+    return rows[0]?.total || 0;
+  }
+
+  /**
+   * Check if all lesson quizzes in a course have been attempted by user
+   */
+  static async hasAttemptedAllLessonQuizzes(userId, courseId) {
+    // Get all lessons with quizzes
+    const lessonsWithQuizzes = await this.getCourseLessonsWithQuizzes(courseId);
+    if (lessonsWithQuizzes.length === 0) {
+      return true; // No quizzes to attempt
+    }
+
+    // Get all lesson quiz attempts by user
+    const { rows } = await pool.query(
+      `SELECT COUNT(DISTINCT lqa.lesson_id)::int AS attempted
+       FROM lesson_quiz_attempts lqa
+       INNER JOIN lessons l ON lqa.lesson_id = l.id
+       WHERE lqa.user_id = $1 AND l.course_id = $2 AND lqa.attempted = true`,
+      [userId, courseId]
+    );
+
+    const attemptedCount = rows[0]?.attempted || 0;
+    return attemptedCount === lessonsWithQuizzes.length;
+  }
+
+  /**
+   * Check if lesson has a quiz
+   */
+  static async lessonHasQuiz(lessonId) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM lesson_quizzes
+       WHERE lesson_id = $1
+       LIMIT 1`,
+      [lessonId]
+    );
+
+    return rows.length > 0;
+  }
 }
 
 module.exports = AssessmentModel;

@@ -6,13 +6,22 @@ const { initializeSchema } = require('./services/schemaInitializer');
 const { initializeSocket } = require('./services/socketService');
 
 const app = express();
+const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 // Trust proxy for proper IP forwarding
 app.set('trust proxy', true);
 
 // Enhanced CORS configuration for frontend on port 3000
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'], // Allow frontend origins
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
@@ -23,12 +32,9 @@ app.use(cors({
 // Handle preflight requests explicitly for better compatibility
 app.options('*', (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'];
   
-  if (allowedOrigins.includes(origin)) {
+  if (origin && (allowedOrigins.length === 0 || allowedOrigins.includes(origin))) {
     res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
   }
   
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -44,12 +50,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Additional CORS middleware for all responses
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'];
   
-  if (allowedOrigins.includes(origin)) {
+  if (origin && (allowedOrigins.length === 0 || allowedOrigins.includes(origin))) {
     res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
   }
   
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -100,16 +103,21 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     message: 'Server is running!',
     timestamp: new Date().toISOString(),
-    port: process.env.PORT || 3002
+    port: process.env.PORT || 3000
   });
+});
+
+app.get('/', (req, res) => {
+  res.send('Backend is running');
 });
 
 // Debug endpoint to help diagnose frontend connection issues
 app.get('/debug', (req, res) => {
   console.log('🔍 Debug endpoint accessed from:', req.headers.origin || 'unknown origin');
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
   res.status(200).json({
     message: 'Backend is working!',
-    server: 'http://localhost:3002',
+    server: baseUrl,
     endpoints: {
       register: '/auth/register',
       login: '/auth/login',
@@ -206,7 +214,7 @@ app.use('*', (req, res) => {
 });
 
 // Server configuration
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0'; // Bind to all interfaces
 
 let server;
@@ -220,15 +228,10 @@ async function startServer() {
       console.log('\n🚀 ================================');
       console.log('✅ E-LEARN PRO BACKEND STARTED!');
       console.log('🚀 ================================');
-      console.log(`📍 Server URL: http://localhost:${PORT}`);
+      console.log(`Server running on port ${PORT}`);
       console.log(`📍 Server Host: ${HOST}:${PORT}`);
       console.log(`📍 Process ID: ${process.pid}`);
-      console.log('\n🔗 Frontend Expected Endpoints:');
-      console.log(`   Login: http://localhost:${PORT}/auth/login`);
-      console.log(`   Register: http://localhost:${PORT}/auth/register`);
-      console.log(`   Profile: http://localhost:${PORT}/auth/me`);
-      console.log(`   Logout: http://localhost:${PORT}/auth/logout`);
-      console.log(`   Reset Password: http://localhost:${PORT}/auth/forgot-password`);
+      console.log('\n🔗 Frontend Expected Endpoints: /auth/login, /auth/register, /auth/me');
       console.log('\n📡 Real-time Features Enabled:');
       console.log('   Authenticated Socket.io chat, notifications, and WebRTC signaling');
       console.log('🚀 ================================\n');

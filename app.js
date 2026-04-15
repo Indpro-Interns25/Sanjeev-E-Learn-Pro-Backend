@@ -3,6 +3,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
+const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 // Middleware
 app.use(express.json());
@@ -16,7 +22,12 @@ app.use((req, res, next) => {
 
 // CORS configuration
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -40,19 +51,7 @@ const authRoutes = require('./routes/authRoutes');
 
 // Root route - Welcome message
 app.get('/', (req, res) => {
-  res.json({
-    message: '🎓 Welcome to E-Learn Pro Backend API!',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      api: '/api',
-      auth: '/auth',
-      dashboard: '/api/dashboard',
-      users: '/api/users',
-      courses: '/api/courses'
-    },
-    status: 'Server is running successfully! ✅'
-  });
+  res.send('Backend is running');
 });
 
 // Favicon route - prevent 404 errors
@@ -86,15 +85,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-// Start the server if not already started
-const PORT = 3002; // Use port 3002 as requested
-const HOST = '127.0.0.1'; // Use IPv4 explicitly
-
 const server = app.listen(PORT, HOST, () => {
-  console.log(`✅ Server running on http://${HOST}:${PORT}`);
-  console.log(`📊 Health check: http://127.0.0.1:${PORT}/health`);
-  console.log(`🔐 Login endpoint: http://127.0.0.1:${PORT}/api/auth/login`);
-  console.log(`📝 Register endpoint: http://127.0.0.1:${PORT}/api/auth/register`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Server host binding ${HOST}:${PORT}`);
   console.log(`🚀 Server ready to accept connections!`);
   
   // Test if server is actually listening

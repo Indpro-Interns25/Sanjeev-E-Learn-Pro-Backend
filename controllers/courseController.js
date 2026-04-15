@@ -87,7 +87,7 @@ exports.list = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10), 1), 100);
   const offset = (page - 1) * limit;
   
-  let query = 'SELECT id, title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, created_at, updated_at FROM courses';
+  let query = 'SELECT id, title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, created_at, updated_at FROM courses';
   let countQuery = 'SELECT COUNT(*)::int AS total FROM courses';
   const queryParams = [];
   const conditions = [];
@@ -185,8 +185,25 @@ exports.get = asyncHandler(async (req, res) => {
 
   const course = await Course.findById(courseId);
   if (!course) return res.status(404).json({ error: 'Course not found' });
-  const [payload] = await attachTags([course]);
-  res.json(normalizeCoursePricing(payload));
+
+  const lessonsResult = await pool.query(
+    `SELECT id AS lesson_id, title, COALESCE(order_index, 0) AS order_index
+     FROM lessons
+     WHERE course_id = $1
+     ORDER BY order_index ASC, id ASC`,
+    [courseId]
+  );
+
+  res.json({
+    courseId: course.id,
+    title: course.title,
+    youtube_playlist_id: course.youtube_playlist_id || null,
+    lessons: lessonsResult.rows.map((lesson) => ({
+      lessonId: lesson.lesson_id,
+      title: lesson.title,
+      order: lesson.order_index
+    }))
+  });
 });
 
 exports.create = asyncHandler(async (req, res) => {
@@ -199,6 +216,7 @@ exports.create = asyncHandler(async (req, res) => {
     instructor_id,
     thumbnail,
     preview_video,
+    youtube_playlist_id,
     status = 'published',
     tags
   } = req.body;
@@ -236,10 +254,19 @@ exports.create = asyncHandler(async (req, res) => {
     status: normalizedStatus,
     thumbnail: thumbnail || null,
     preview_video: preview_video || null,
+    youtube_playlist_id: youtube_playlist_id ? String(youtube_playlist_id).trim() : null,
     is_free: true
   };
 
-  const created = await Course.create(courseData);
+  let created;
+  try {
+    created = await Course.create(courseData);
+  } catch (error) {
+    if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
+      return res.status(409).json({ error: 'youtube_playlist_id must be unique per course' });
+    }
+    throw error;
+  }
   await syncCourseTags(created.id, tags || []);
   const [payload] = await attachTags([created]);
   res.status(201).json(normalizeCoursePricing(payload));
@@ -257,6 +284,7 @@ exports.update = asyncHandler(async (req, res) => {
     instructor_id, 
     thumbnail, 
     preview_video,
+    youtube_playlist_id,
     is_featured,
     tags
   } = req.body;
@@ -293,24 +321,33 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   // Use direct database query to handle all fields with COALESCE
-  const updated = await pool.query(`
-    UPDATE courses SET 
-      title = COALESCE($1, title),
-      description = COALESCE($2, description),
-      category = COALESCE($3, category),
-      level = COALESCE($4, level),
-      duration = COALESCE($5, duration),
-      status = COALESCE($6, status),
-      instructor_id = COALESCE($7, instructor_id),
-      thumbnail = COALESCE($8, thumbnail),
-      preview_video = COALESCE($9, preview_video),
-      is_featured = COALESCE($10, is_featured),
-      is_free = true,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = $11 
-    RETURNING *`,
-    [title, description, category, level, duration, status, instructor_id, thumbnail, preview_video, is_featured, id]
-  );
+  let updated;
+  try {
+    updated = await pool.query(`
+      UPDATE courses SET 
+        title = COALESCE($1, title),
+        description = COALESCE($2, description),
+        category = COALESCE($3, category),
+        level = COALESCE($4, level),
+        duration = COALESCE($5, duration),
+        status = COALESCE($6, status),
+        instructor_id = COALESCE($7, instructor_id),
+        thumbnail = COALESCE($8, thumbnail),
+        preview_video = COALESCE($9, preview_video),
+        is_featured = COALESCE($10, is_featured),
+        youtube_playlist_id = COALESCE($11, youtube_playlist_id),
+        is_free = true,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $12 
+      RETURNING *`,
+      [title, description, category, level, duration, status, instructor_id, thumbnail, preview_video, is_featured, youtube_playlist_id, id]
+    );
+  } catch (error) {
+    if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
+      return res.status(409).json({ error: 'youtube_playlist_id must be unique per course' });
+    }
+    throw error;
+  }
 
   if (updated.rows.length === 0) {
     return res.status(404).json({ error: 'Course not found' });

@@ -4,7 +4,7 @@
   "description": "Express backend for E-Learn Pro",
   "main": "app.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node app.js",
     "dev": "nodemon server.js",
     "dev-old": "nodemon app.js",
     "dev-fixed": "nodemon app-fixed.js",

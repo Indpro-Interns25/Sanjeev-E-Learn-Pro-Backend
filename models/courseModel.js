@@ -12,15 +12,16 @@ class CourseModel {
       status, 
       thumbnail, 
       preview_video,
+      youtube_playlist_id,
       is_free
     } = courseData;
     
     const { rows } = await pool.query(
       `INSERT INTO courses 
-       (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, is_free) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, is_free) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
        RETURNING *`,
-      [title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, true]
+      [title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id || null, true]
     );
     return rows[0];
   }

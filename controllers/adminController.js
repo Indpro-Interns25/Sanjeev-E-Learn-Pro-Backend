@@ -240,7 +240,8 @@ exports.createCourse = asyncHandler(async (req, res) => {
     status = 'published', 
     instructor_id,
     thumbnail,
-    preview_video
+    preview_video,
+    youtube_playlist_id
   } = req.body;
 
   if (!title || !description) {
@@ -278,24 +279,34 @@ exports.createCourse = asyncHandler(async (req, res) => {
     status: normalizedStatus,
     thumbnail: thumbnail || null,
     preview_video: preview_video || null,
+    youtube_playlist_id: youtube_playlist_id ? String(youtube_playlist_id).trim() : null,
     is_free: true
   };
 
-  const course = await pool.query(
-    'INSERT INTO courses (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, is_free) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-    [
-      courseData.title,
-      courseData.description,
-      courseData.instructor_id,
-      courseData.category,
-      courseData.level,
-      courseData.duration,
-      courseData.status,
-      courseData.thumbnail,
-      courseData.preview_video,
-      true
-    ]
-  );
+  let course;
+  try {
+    course = await pool.query(
+      'INSERT INTO courses (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, is_free) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+      [
+        courseData.title,
+        courseData.description,
+        courseData.instructor_id,
+        courseData.category,
+        courseData.level,
+        courseData.duration,
+        courseData.status,
+        courseData.thumbnail,
+        courseData.preview_video,
+        courseData.youtube_playlist_id,
+        true
+      ]
+    );
+  } catch (error) {
+    if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
+      return res.status(409).json({ error: 'youtube_playlist_id must be unique per course' });
+    }
+    throw error;
+  }
 
   res.status(201).json({
     success: true,
@@ -316,6 +327,7 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     instructor_id, 
     thumbnail, 
     preview_video, 
+    youtube_playlist_id,
     is_featured 
   } = req.body;
 
@@ -369,6 +381,10 @@ exports.updateCourse = asyncHandler(async (req, res) => {
     updates.push(`preview_video = $${paramCount++}`);
     values.push(preview_video);
   }
+  if (youtube_playlist_id !== undefined) {
+    updates.push(`youtube_playlist_id = $${paramCount++}`);
+    values.push(youtube_playlist_id ? String(youtube_playlist_id).trim() : null);
+  }
   if (is_featured !== undefined) {
     updates.push(`is_featured = $${paramCount++}`);
     values.push(is_featured);
@@ -388,7 +404,15 @@ exports.updateCourse = asyncHandler(async (req, res) => {
   values.push(courseId);
 
   const query = `UPDATE courses SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
-  const course = await pool.query(query, values);
+  let course;
+  try {
+    course = await pool.query(query, values);
+  } catch (error) {
+    if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
+      return res.status(409).json({ error: 'youtube_playlist_id must be unique per course' });
+    }
+    throw error;
+  }
 
   if (course.rows.length === 0) {
     return res.status(404).json({ 

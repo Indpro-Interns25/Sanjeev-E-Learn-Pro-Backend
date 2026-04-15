@@ -26,6 +26,16 @@ exports.getFinalTestByCourse = asyncHandler(async (req, res) => {
     });
   }
 
+  // GLOBAL LOGIC: Check if ALL lesson quizzes have been attempted
+  const allQuizzesAttempted = await Assessment.hasAttemptedAllLessonQuizzes(userId, courseId);
+  if (!allQuizzesAttempted) {
+    return res.status(403).json({
+      success: false,
+      message: 'Complete all lesson quizzes before accessing final test',
+      data: null
+    });
+  }
+
   const questions = await Assessment.getFinalTestQuestions(courseId);
   const totalAvailable = await Assessment.countFinalTestQuestions(courseId);
   if (questions.length === 0) {
@@ -72,6 +82,16 @@ exports.submitFinalTest = asyncHandler(async (req, res) => {
     });
   }
 
+  // GLOBAL LOGIC: Check if ALL lesson quizzes have been attempted
+  const allQuizzesAttempted = await Assessment.hasAttemptedAllLessonQuizzes(userId, parsedCourseId);
+  if (!allQuizzesAttempted) {
+    return res.status(403).json({
+      success: false,
+      message: 'Complete all lesson quizzes before accessing final test',
+      data: null
+    });
+  }
+
   const completion = await UserProgress.getCourseCompletion(userId, parsedCourseId);
   if (!completion.completionReady) {
     return res.status(400).json({
@@ -89,9 +109,25 @@ exports.submitFinalTest = asyncHandler(async (req, res) => {
   const result = await Assessment.gradeFinalTest(parsedCourseId, answers);
   const attempt = await Assessment.saveFinalTestAttempt(userId, parsedCourseId, result.score, result.passed);
 
+  let certificateData = null;
+
+  // GLOBAL LOGIC: Auto-generate certificate if final test passed (>= 70%)
+  if (result.passed && result.score >= 70) {
+    // Import certificate model if not already imported
+    const Certificate = require('../models/certificateModel');
+    try {
+      certificateData = await Certificate.issueForUserCourse(userId, parsedCourseId, result.score);
+    } catch (certError) {
+      console.warn('Certificate generation warning:', certError.message);
+      // Continue even if certificate generation fails
+    }
+  }
+
   res.json({
     success: true,
-    message: result.passed ? 'Final test passed' : 'Final test failed. You can retry.',
+    message: result.passed 
+      ? `Final test passed! ${certificateData ? 'Certificate generated.' : ''}` 
+      : 'Final test failed. You can retry.',
     data: {
       attemptId: attempt.id,
       userId,
@@ -101,7 +137,13 @@ exports.submitFinalTest = asyncHandler(async (req, res) => {
       passThreshold: 70,
       totalQuestions: result.total,
       correctAnswers: result.correctCount,
-      attemptedAt: attempt.attempted_at
+      attemptedAt: attempt.attempted_at,
+      certificate: certificateData ? {
+        id: certificateData.id,
+        certificate_code: certificateData.certificate_code,
+        issued_at: certificateData.issued_at,
+        score: certificateData.score
+      } : null
     }
   });
 });
