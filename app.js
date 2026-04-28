@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
+const session = require('express-session');
+const passport = require('passport');
 require('dotenv').config();
+
+require('./config/passport')(passport);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,6 +17,20 @@ const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL ||
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'oauth-session-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  },
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Add request logging middleware BEFORE routes
 app.use((req, res, next) => {

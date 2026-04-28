@@ -1,9 +1,17 @@
 const express = require('express');
 const cors = require('cors');
+const session = require('express-session');
+const passport = require('passport');
 require('dotenv').config();
 const activityLogMiddleware = require('./middleware/activityLogMiddleware');
 const { initializeSchema } = require('./services/schemaInitializer');
 const { initializeSocket } = require('./services/socketService');
+const { login, register, validateToken } = require('./controllers/authController');
+const statsController = require('./controllers/statsController');
+const routes = require('./routes');
+const authRoutes = require('./routes/authRoutes');
+
+require('./config/passport')(passport);
 
 const app = express();
 const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || '')
@@ -28,6 +36,20 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 200
 }));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'oauth-session-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  },
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Handle preflight requests explicitly for better compatibility
 app.options('*', (req, res) => {
@@ -63,10 +85,8 @@ app.use((req, res, next) => {
 
 // URL cleaning middleware - remove trailing spaces and normalize URLs
 app.use((req, res, next) => {
-  // Decode the URL and remove trailing whitespace
   const cleanUrl = decodeURIComponent(req.url).trim();
   
-  // If the URL was cleaned (had trailing spaces), redirect to clean URL
   if (cleanUrl !== decodeURIComponent(req.url)) {
     console.log(`🧹 Cleaning URL: "${req.url}" -> "${encodeURI(cleanUrl)}"`);
     req.url = encodeURI(cleanUrl);
@@ -83,7 +103,6 @@ app.use((req, res, next) => {
   const origin = req.headers.origin || 'no-origin';
   console.log(`[${timestamp}] ${req.method} ${req.originalUrl} - IP: ${ip} - Origin: ${origin}`);
   
-  // Log request body for POST requests (except passwords)
   if (req.method === 'POST' && req.body) {
     const logBody = { ...req.body };
     if (logBody.password) logBody.password = '***';
@@ -137,10 +156,8 @@ app.get('/test', (req, res) => {
   });
 });
 
-// Import and use routes
-const routes = require('./routes');
-const { login, register, validateToken } = require('./controllers/authController');
-const statsController = require('./controllers/statsController');
+// Add auth routes that Passport uses
+app.use('/auth', authRoutes);
 
 // Add direct API routes that frontend expects
 app.post('/auth/login', login);
@@ -156,10 +173,43 @@ app.get('/auth/me', validateToken, (req, res) => {
     }
   });
 });
-app.post('/auth/logout', (req, res) => {
-  res.status(200).json({
-    message: 'Logout successful'
-  });
+app.post('/auth/logout', (req, res, next) => {
+  const finish = () => {
+    res.status(200).json({
+      message: 'Logout successful'
+    });
+  };
+
+  if (typeof req.logout === 'function') {
+    return req.logout((error) => {
+      if (error) {
+        return next(error);
+      }
+
+      if (req.session) {
+        return req.session.destroy((sessionError) => {
+          if (sessionError) {
+            return next(sessionError);
+          }
+
+          finish();
+        });
+      }
+
+      return finish();
+    });
+  }
+
+  if (req.session) {
+    return req.session.destroy((error) => {
+      if (error) {
+        return next(error);
+      }
+      finish();
+    });
+  }
+
+  return finish();
 });
 app.post('/auth/forgot-password', (req, res) => {
   res.status(200).json({
@@ -208,7 +258,13 @@ app.use('*', (req, res) => {
       'POST /login',
       'POST /register',
       'POST /api/auth/login',
-      'POST /api/auth/register'
+      'POST /api/auth/register',
+      'GET /auth/google',
+      'GET /auth/google/callback',
+      'GET /auth/github',
+      'GET /auth/github/callback',
+      'GET /auth/facebook',
+      'GET /auth/facebook/callback'
     ]
   });
 });
@@ -277,7 +333,6 @@ const gracefulShutdown = (signal) => {
     process.exit(0);
   });
   
-  // Force close after 10 seconds
   setTimeout(() => {
     console.log('⏰ Forcing server shutdown...');
     process.exit(1);

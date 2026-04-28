@@ -35,6 +35,14 @@ exports.validateToken = asyncHandler(async (req, res, next) => {
     }
   }
 
+  if (typeof req.isAuthenticated === 'function' && req.isAuthenticated() && req.user) {
+    if (req.user.status === 'blocked') {
+      return res.status(403).json({ success: false, message: 'Account is blocked' });
+    }
+
+    return next();
+  }
+
   if (!token) {
     return res.status(401).json({ success: false, message: 'Not authorized, no token' });
   }

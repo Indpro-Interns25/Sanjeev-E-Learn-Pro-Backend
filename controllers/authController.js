@@ -207,6 +207,14 @@ exports.validateToken = asyncHandler(async (req, res, next) => {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (typeof req.isAuthenticated === 'function' && req.isAuthenticated() && req.user) {
+      if (req.user.status === 'blocked') {
+        return res.status(403).json({ error: 'Account is blocked' });
+      }
+
+      return next();
+    }
+
     return res.status(401).json({ error: 'No token provided' });
   }
 
