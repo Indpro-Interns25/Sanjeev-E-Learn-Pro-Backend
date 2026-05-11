@@ -10,11 +10,11 @@ class EnrollmentModel {
   }
   static async listByUser(user_id) {
     const { rows } = await pool.query(
-      `SELECT e.*, c.title AS course_title
+      `SELECT e.*, c.title AS course_title, c.status AS course_status, c.thumbnail, c.description
        FROM enrollments e
        JOIN courses c ON c.id = e.course_id
-       WHERE e.user_id=$1
-       ORDER BY e.id`,
+       WHERE e.user_id=$1 AND e.is_active = true AND c.status = 'published'
+       ORDER BY e.enrolled_at DESC`,
       [user_id]
     );
     return rows;

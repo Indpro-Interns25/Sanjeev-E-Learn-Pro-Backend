@@ -99,7 +99,7 @@ exports.listUser = asyncHandler(async (req, res) => {
   }
 
   const rows = await Enrollment.listByUser(userId);
-  res.json(rows);
+  res.json({ success: true, data: rows });
 });
 
 exports.listAll = asyncHandler(async (req, res) => {
@@ -142,7 +142,7 @@ exports.listCourse = asyncHandler(async (req, res) => {
   }
 
   const rows = await Enrollment.listByCourse(courseId);
-  res.json(rows);
+  res.json({ success: true, data: rows });
 });
 
 exports.unenroll = asyncHandler(async (req, res) => {
