@@ -25,7 +25,18 @@ exports.enroll = asyncHandler(async (req, res) => {
   const targetUserId = resolveTargetUserId(req, user_id);
   const parsedCourseId = parseInt(course_id, 10);
 
-  if (!targetUserId || !parsedCourseId) return res.status(400).json({ error: 'course_id required' });
+  console.warn(`\n📝 Enroll called:`);
+  console.warn(`  - Body user_id: ${user_id}`);
+  console.warn(`  - Body course_id: ${course_id}`);
+  console.warn(`  - Requester ID: ${req.user.id}`);
+  console.warn(`  - Requester Role: ${req.user.role}`);
+  console.warn(`  - Target User ID: ${targetUserId}`);
+  console.warn(`  - Parsed Course ID: ${parsedCourseId}`);
+
+  if (!targetUserId || !parsedCourseId) {
+    console.warn(`  - 🚫 Missing targetUserId or parsedCourseId`);
+    return res.status(400).json({ error: 'course_id required' });
+  }
   
   // Verify course and student exist before attempting enrollment
   const [courseCheck, userCheck] = await Promise.all([
@@ -33,7 +44,11 @@ exports.enroll = asyncHandler(async (req, res) => {
     pool.query('SELECT id, role FROM users WHERE id = $1', [targetUserId])
   ]);
   
+  console.warn(`  - 📖 Course exists: ${courseCheck.rows.length > 0}`);
+  console.warn(`  - 👤 User exists: ${userCheck.rows.length > 0}`);
+  
   if (courseCheck.rows.length === 0) {
+    console.warn(`  - 🚫 Course not found`);
     return res.status(404).json({ 
       error: 'Course not found',
       message: `Course with ID ${parsedCourseId} does not exist. Please refresh the page to get updated course list.`,
@@ -42,10 +57,12 @@ exports.enroll = asyncHandler(async (req, res) => {
   }
 
   if (userCheck.rows.length === 0) {
+    console.warn(`  - 🚫 User not found`);
     return res.status(404).json({ error: 'User not found' });
   }
 
   if (userCheck.rows[0].role !== 'student') {
+    console.warn(`  - 🚫 User is not a student (role: ${userCheck.rows[0].role})`);
     return res.status(400).json({ error: 'Only students can be enrolled in courses' });
   }
 
@@ -53,16 +70,22 @@ exports.enroll = asyncHandler(async (req, res) => {
 
   try {
     await client.query('BEGIN');
+    console.warn(`  - 🔄 Transaction started`);
 
     const existingEnrollment = await client.query(
       'SELECT id, is_active FROM enrollments WHERE user_id = $1 AND course_id = $2',
       [targetUserId, parsedCourseId]
     );
 
+    console.warn(`  - 🔍 Existing enrollment: ${existingEnrollment.rows.length > 0 ? 'YES' : 'NO'}`);
+
     const result = await client.query(
       'INSERT INTO enrollments (user_id, course_id, is_active, enrolled_at) VALUES ($1, $2, true, NOW()) ON CONFLICT (user_id, course_id) DO UPDATE SET is_active = true RETURNING *',
       [targetUserId, parsedCourseId]
     );
+
+    console.warn(`  - ✅ Enrollment insert/update successful`);
+    console.warn(`  - 📊 Enrollment record:`, result.rows[0]);
 
     await client.query(
       `UPDATE users
@@ -75,15 +98,23 @@ exports.enroll = asyncHandler(async (req, res) => {
       [targetUserId, parsedCourseId]
     );
 
-    await client.query('COMMIT');
+    console.warn(`  - ✅ User enrolled_courses array updated`);
 
-    return res.status(existingEnrollment.rows[0]?.is_active ? 200 : 201).json({ 
+    await client.query('COMMIT');
+    console.warn(`  - ✅ Transaction committed`);
+
+    const response = {
       message: existingEnrollment.rows[0]?.is_active ? 'Already enrolled' : 'Enrollment successful',
       enrollment: result.rows[0],
       alreadyEnrolled: !!existingEnrollment.rows[0]?.is_active
-    });
+    };
+    
+    console.warn(`  - 📤 Sending response:`, response);
+    return res.status(existingEnrollment.rows[0]?.is_active ? 200 : 201).json(response);
+    
   } catch (error) {
     await client.query('ROLLBACK');
+    console.error(`  - 🚫 Error during enrollment:`, error);
     throw error;
   } finally {
     client.release();
@@ -94,12 +125,36 @@ exports.listUser = asyncHandler(async (req, res) => {
   const requestedUserId = parseInt(req.params.userId, 10);
   const userId = req.user.role === 'admin' ? requestedUserId : req.user.id;
 
+  console.warn(`\n📝 listUser called:`);
+  console.warn(`  - Requested User ID: ${requestedUserId}`);
+  console.warn(`  - Requester Role: ${req.user.role}`);
+  console.warn(`  - Requester ID: ${req.user.id}`);
+  console.warn(`  - Final User ID: ${userId}`);
+
   if (req.user.role !== 'admin' && requestedUserId !== req.user.id) {
+    console.warn(`  - 🚫 Access denied: not admin and requestedUserId doesn't match req.user.id`);
     return res.status(403).json({ error: 'Forbidden: cannot view another user enrollments' });
   }
 
+  console.warn(`  - ✅ Authorization passed`);
+  
   const rows = await Enrollment.listByUser(userId);
-  res.json({ success: true, data: rows });
+  
+  console.warn(`  - 📊 Enrollments found: ${rows.length}`);
+  if (rows.length > 0) {
+    console.warn(`  - 📋 Enrollment details:`, rows.map(e => ({
+      id: e.id,
+      user_id: e.user_id,
+      course_id: e.course_id,
+      is_active: e.is_active,
+      course_title: e.title,
+      course_status: e.status
+    })));
+  }
+  
+  const responseData = { success: true, data: rows };
+  console.warn(`  - 📤 Sending response:`, responseData);
+  res.json(responseData);
 });
 
 exports.listAll = asyncHandler(async (req, res) => {
