@@ -5,6 +5,7 @@ const { formatDurationForDB, formatDurationForForm } = require('../utils/duratio
 const pool = require('../db');
 
 async function canAccessCourse(user, courseId) {
+  if (!user) return false;
   if (user.role === 'admin') return true;
 
   if (user.role === 'instructor') {
@@ -17,6 +18,22 @@ async function canAccessCourse(user, courseId) {
     [user.id, courseId]
   );
   return enrolled.rows.length > 0;
+}
+
+async function canAccessPublishedCourse(courseId) {
+  const result = await pool.query('SELECT id FROM courses WHERE id = $1 AND status = $2', [courseId, 'published']);
+  return result.rows.length > 0;
+}
+
+function toPublicLessonSummary(lesson) {
+  return {
+    id: lesson.id,
+    lesson_id: lesson.id,
+    title: lesson.title,
+    order_index: lesson.order_index || 0,
+    order_number: lesson.order_number || lesson.order_index || 0,
+    duration: lesson.duration || null
+  };
 }
 
 async function canManageCourse(user, courseId) {
@@ -83,11 +100,15 @@ exports.getAllLessons = asyncHandler(async (req, res) => {
 
 exports.listByCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
-  const allowed = await canAccessCourse(req.user, courseId);
-  if (!allowed) return res.status(403).json({ error: 'Forbidden: course not accessible' });
-
   const lessons = await Lesson.findByCourse(courseId);
-  res.json(lessons);
+  const allowed = await canAccessCourse(req.user, courseId);
+  if (allowed) return res.json(lessons);
+
+  const isPublicCourse = await canAccessPublishedCourse(courseId);
+  if (!isPublicCourse) return res.status(403).json({ error: 'Forbidden: course not accessible' });
+
+  // Anonymous/public users can view curriculum summary but not lesson content.
+  res.json(lessons.map(toPublicLessonSummary));
 });
 
 exports.create = asyncHandler(async (req, res) => {
@@ -199,15 +220,20 @@ exports.getCurriculum = asyncHandler(async (req, res) => {
   const course = await Course.findById(courseId);
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
-  const allowed = await canAccessCourse(req.user, courseId);
-  if (!allowed) return res.status(403).json({ error: 'Forbidden: course not accessible' });
-  
   const lessons = await Lesson.findByCourse(courseId);
+  const allowed = await canAccessCourse(req.user, courseId);
+  const isPublicCourse = course.status === 'published';
+
+  if (!allowed && !isPublicCourse) {
+    return res.status(403).json({ error: 'Forbidden: course not accessible' });
+  }
+
+  const curriculum = allowed ? lessons : lessons.map(toPublicLessonSummary);
   
   res.json({
     course: course,
-    curriculum: lessons,
-    totalLessons: lessons.length
+    curriculum,
+    totalLessons: curriculum.length
   });
 });
 

@@ -83,6 +83,7 @@ function normalizeCoursePricing(course) {
 
 exports.list = asyncHandler(async (req, res) => {
   const { featured, sortBy, sortOrder, title, search, category, level, tag } = req.query;
+  const requesterRole = req.user?.role;
   const page = Math.max(parseInt(req.query.page || '1', 10), 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10), 1), 100);
   const offset = (page - 1) * limit;
@@ -124,18 +125,13 @@ exports.list = asyncHandler(async (req, res) => {
     queryParams.push(String(tag).trim().toLowerCase());
   }
 
-  if (req.user.role === 'instructor') {
+  if (requesterRole === 'instructor') {
     conditions.push('instructor_id = $' + (queryParams.length + 1));
     queryParams.push(req.user.id);
-  }
-
-  if (req.user.role === 'student') {
-    conditions.push(`id IN (
-      SELECT course_id
-      FROM enrollments
-      WHERE user_id = $${queryParams.length + 1} AND is_active = true
-    )`);
-    queryParams.push(req.user.id);
+  } else if (requesterRole !== 'admin') {
+    // Public/student listing should only expose published courses.
+    conditions.push('status = $' + (queryParams.length + 1));
+    queryParams.push('published');
   }
   
   // Add WHERE clause if there are conditions
@@ -180,11 +176,17 @@ exports.list = asyncHandler(async (req, res) => {
 
 exports.get = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.id, 10);
-  const allowed = await canAccessCourse(req.user, courseId);
-  if (!allowed) return res.status(403).json({ error: 'Forbidden: course not accessible for this user' });
-
   const course = await Course.findById(courseId);
   if (!course) return res.status(404).json({ error: 'Course not found' });
+
+  const requesterRole = req.user?.role;
+  const isOwnerInstructor = requesterRole === 'instructor' && course.instructor_id === req.user.id;
+  const isAdmin = requesterRole === 'admin';
+  const isPublicCourse = course.status === 'published';
+
+  if (!isAdmin && !isOwnerInstructor && !isPublicCourse) {
+    return res.status(403).json({ error: 'Forbidden: course not accessible for this user' });
+  }
 
   const lessonsResult = await pool.query(
     `SELECT id AS lesson_id, title, COALESCE(order_index, 0) AS order_index
@@ -377,8 +379,17 @@ exports.remove = asyncHandler(async (req, res) => {
 // GET /api/courses/:courseId/comments
 exports.getCourseComments = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
-  const allowed = await canAccessCourse(req.user, courseId);
-  if (!allowed) return res.status(403).json({ success: false, message: 'Forbidden: course not accessible' });
+  const course = await Course.findById(courseId);
+  if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
+  const requesterRole = req.user?.role;
+  const isOwnerInstructor = requesterRole === 'instructor' && course.instructor_id === req.user.id;
+  const isAdmin = requesterRole === 'admin';
+  const isPublicCourse = course.status === 'published';
+
+  if (!isAdmin && !isOwnerInstructor && !isPublicCourse) {
+    return res.status(403).json({ success: false, message: 'Forbidden: course not accessible' });
+  }
 
   const result = await pool.query(`
     SELECT c.*, u.name as author_name, u.email as author_email

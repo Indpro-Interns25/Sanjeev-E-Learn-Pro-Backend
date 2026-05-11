@@ -3,24 +3,24 @@ const router = express.Router();
 const courseController = require('../controllers/courseController');
 const lessonController = require('../controllers/lessonController');
 const quizSystemController = require('../controllers/quizSystemController');
-const { validateToken } = require('../middleware/authMiddleware');
+const { validateToken, attachUserIfPresent } = require('../middleware/authMiddleware');
 const { allowRoles } = require('../middleware/rbacMiddleware');
 
 // Course CRUD operations
-router.get('/', validateToken, courseController.list);
-router.get('/:id', validateToken, courseController.get);
+router.get('/', attachUserIfPresent, courseController.list);
+router.get('/:id', attachUserIfPresent, courseController.get);
 router.post('/', validateToken, allowRoles('admin', 'instructor'), courseController.create);
 router.put('/:id', validateToken, allowRoles('admin', 'instructor'), courseController.update);
 router.delete('/:id', validateToken, allowRoles('admin'), courseController.remove);
 
 // Course curriculum (lessons) endpoints
-router.get('/:courseId/lessons', validateToken, lessonController.listByCourse);
+router.get('/:courseId/lessons', attachUserIfPresent, lessonController.listByCourse);
 router.post('/:courseId/lessons', validateToken, allowRoles('admin', 'instructor'), lessonController.create);
 router.get('/:courseId/lessons/:lessonId', validateToken, lessonController.getLessonById);
-router.get('/:courseId/curriculum', validateToken, lessonController.getCurriculum);
+router.get('/:courseId/curriculum', attachUserIfPresent, lessonController.getCurriculum);
 
 // Alias route for lectures (frontend uses both /lessons and /lectures)
-router.get('/:courseId/lectures', validateToken, lessonController.listByCourse);
+router.get('/:courseId/lectures', attachUserIfPresent, lessonController.listByCourse);
 router.get('/:courseId/lectures/:lectureId', validateToken, lessonController.getLessonById);
 
 // Lesson comments
@@ -31,7 +31,7 @@ router.get('/:courseId/lessons/:lessonId/comments', validateToken, lessonControl
 router.get('/:courseId/lessons/:lessonId/quiz', validateToken, quizSystemController.getLessonQuiz);
 
 // Course comments
-router.get('/:courseId/comments', validateToken, courseController.getCourseComments);
+router.get('/:courseId/comments', attachUserIfPresent, courseController.getCourseComments);
 router.post('/:courseId/comments', validateToken, courseController.addCourseComment);
 
 // Course quiz
