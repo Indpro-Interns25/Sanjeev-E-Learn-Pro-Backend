@@ -179,7 +179,7 @@ exports.get = asyncHandler(async (req, res) => {
   const course = await Course.findById(courseId);
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
-  const requesterRole = req.user?.role;
+  const requesterRole = req.user ? req.user.role : null;
   const isOwnerInstructor = requesterRole === 'instructor' && course.instructor_id === req.user.id;
   const isAdmin = requesterRole === 'admin';
   const isPublicCourse = course.status === 'published';
@@ -188,23 +188,74 @@ exports.get = asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Forbidden: course not accessible for this user' });
   }
 
-  const lessonsResult = await pool.query(
-    `SELECT id AS lesson_id, title, COALESCE(order_index, 0) AS order_index
-     FROM lessons
-     WHERE course_id = $1
-     ORDER BY order_index ASC, id ASC`,
-    [courseId]
-  );
+  // Get instructor details
+  let instructor = null;
+  try {
+    const instructorResult = await pool.query(
+      'SELECT id, name, email FROM users WHERE id = $1',
+      [course.instructor_id]
+    );
+    if (instructorResult.rows && instructorResult.rows.length > 0) {
+      instructor = instructorResult.rows[0];
+    }
+  } catch (err) {
+    console.error('Error fetching instructor:', err);
+  }
 
-  res.json({
+  // Get lessons with full details for the course
+  let lessons = [];
+  try {
+    console.warn(`\n📚 Fetching lessons for course ${courseId}...`);
+    const lessonsResult = await pool.query(
+      'SELECT * FROM lessons WHERE course_id = $1 ORDER BY COALESCE(order_index, 0) ASC, id ASC',
+      [courseId]
+    );
+    console.warn(`  - Lessons query returned ${lessonsResult.rows ? lessonsResult.rows.length : 0} rows`);
+    if (lessonsResult.rows && lessonsResult.rows.length > 0) {
+      console.warn(`  - First lesson columns:`, Object.keys(lessonsResult.rows[0]));
+      lessons = lessonsResult.rows.map((lesson) => ({
+        id: lesson.id,
+        lessonId: lesson.id,
+        course_id: lesson.course_id,
+        title: lesson.title,
+        content: lesson.content,
+        video_url: lesson.video_url,
+        duration: lesson.duration,
+        order_index: lesson.order_index,
+        order: lesson.order_index || 0,
+        created_at: lesson.created_at,
+        updated_at: lesson.updated_at
+      }));
+    }
+  } catch (err) {
+    console.error('❌ Error fetching lessons:', err.message);
+    lessons = [];
+  }
+
+  // Return complete course data
+  const responseData = {
+    id: course.id,
     courseId: course.id,
     title: course.title,
+    description: course.description,
+    category: course.category,
+    level: course.level,
+    duration: course.duration,
+    status: course.status,
+    thumbnail: course.thumbnail,
+    preview_video: course.preview_video,
     youtube_playlist_id: course.youtube_playlist_id || null,
-    lessons: lessonsResult.rows.map((lesson) => ({
-      lessonId: lesson.lesson_id,
-      title: lesson.title,
-      order: lesson.order_index
-    }))
+    created_at: course.created_at,
+    updated_at: course.updated_at,
+    instructor_id: course.instructor_id,
+    instructor_name: (instructor && instructor.name) ? instructor.name : 'Unknown Instructor',
+    isFree: true,
+    lessons: lessons
+  };
+
+  res.json({
+    success: true,
+    data: responseData
   });
 });
 

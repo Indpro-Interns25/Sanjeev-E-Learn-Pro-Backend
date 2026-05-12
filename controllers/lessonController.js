@@ -5,7 +5,12 @@ const { formatDurationForDB, formatDurationForForm } = require('../utils/duratio
 const pool = require('../db');
 
 async function canAccessCourse(user, courseId) {
-  if (!user) return false;
+  if (!user) {
+    // Anonymous users can only access published courses
+    const result = await pool.query('SELECT id FROM courses WHERE id = $1 AND status = $2', [courseId, 'published']);
+    return result.rows.length > 0;
+  }
+  
   if (user.role === 'admin') return true;
 
   if (user.role === 'instructor') {
@@ -102,13 +107,21 @@ exports.listByCourse = asyncHandler(async (req, res) => {
   const courseId = parseInt(req.params.courseId, 10);
   const lessons = await Lesson.findByCourse(courseId);
   const allowed = await canAccessCourse(req.user, courseId);
-  if (allowed) return res.json(lessons);
+  if (allowed) {
+    return res.json({
+      success: true,
+      data: lessons
+    });
+  }
 
   const isPublicCourse = await canAccessPublishedCourse(courseId);
   if (!isPublicCourse) return res.status(403).json({ error: 'Forbidden: course not accessible' });
 
   // Anonymous/public users can view curriculum summary but not lesson content.
-  res.json(lessons.map(toPublicLessonSummary));
+  res.json({
+    success: true,
+    data: lessons.map(toPublicLessonSummary)
+  });
 });
 
 exports.create = asyncHandler(async (req, res) => {
@@ -171,7 +184,11 @@ exports.getLessonById = asyncHandler(async (req, res) => {
   const allowed = await canAccessCourse(req.user, lesson.course_id);
   if (!allowed) return res.status(403).json({ error: 'Forbidden: lesson not accessible' });
 
-  res.json(lesson);
+  // Return formatted response with all lesson data
+  res.json({
+    success: true,
+    data: lesson
+  });
 });
 
 exports.updateLesson = asyncHandler(async (req, res) => {
