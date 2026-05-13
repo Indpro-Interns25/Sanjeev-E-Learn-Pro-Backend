@@ -87,6 +87,15 @@ exports.enroll = asyncHandler(async (req, res) => {
     console.warn(`  - ✅ Enrollment insert/update successful`);
     console.warn(`  - 📊 Enrollment record:`, result.rows[0]);
 
+    // Only increment enrolled_count if this is a new enrollment
+    if (!existingEnrollment.rows.length || !existingEnrollment.rows[0].is_active) {
+      await client.query(
+        'UPDATE courses SET enrolled_count = COALESCE(enrolled_count, 0) + 1 WHERE id = $1',
+        [parsedCourseId]
+      );
+      console.warn(`  - ✅ Course enrolled_count incremented`);
+    }
+
     await client.query(
       `UPDATE users
        SET enrolled_courses = CASE
@@ -219,6 +228,13 @@ exports.unenroll = asyncHandler(async (req, res) => {
     await client.query('BEGIN');
 
     await client.query('DELETE FROM enrollments WHERE user_id = $1 AND course_id = $2', [targetUserId, parsedCourseId]);
+    
+    // Decrement course enrolled_count
+    await client.query(
+      'UPDATE courses SET enrolled_count = GREATEST(COALESCE(enrolled_count, 1) - 1, 0) WHERE id = $1',
+      [parsedCourseId]
+    );
+    
     await client.query(
       `UPDATE users
        SET enrolled_courses = array_remove(COALESCE(enrolled_courses, '{}'::integer[]), $2)

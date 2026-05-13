@@ -4,8 +4,8 @@ const enrollmentController = require('../controllers/enrollmentController');
 const { validateToken } = require('../middleware/authMiddleware');
 const { allowRoles } = require('../middleware/rbacMiddleware');
 
-// List all enrollments (admin)
-router.get('/', validateToken, allowRoles('admin', 'instructor'), enrollmentController.listAll);
+// List enrollments. Admins/instructors receive their management view; students receive their own enrollments.
+router.get('/', validateToken, enrollmentController.listAll);
 
 router.post('/', validateToken, enrollmentController.enroll);
 router.post('/unenroll', validateToken, enrollmentController.unenroll);

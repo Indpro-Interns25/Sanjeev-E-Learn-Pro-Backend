@@ -88,7 +88,7 @@ exports.list = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10), 1), 100);
   const offset = (page - 1) * limit;
   
-  let query = 'SELECT id, title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, created_at, updated_at FROM courses';
+  let query = 'SELECT id, title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, enrolled_count, rating, created_at, updated_at FROM courses';
   let countQuery = 'SELECT COUNT(*)::int AS total FROM courses';
   const queryParams = [];
   const conditions = [];
