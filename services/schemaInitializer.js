@@ -2,10 +2,30 @@ const pool = require('../db');
 
 let initialized = false;
 
+function isTransientDbError(error) {
+  if (!error) return false;
+
+  const transientCodes = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'XX000', '57P03']);
+  if (error.code && transientCodes.has(error.code)) {
+    return true;
+  }
+
+  const message = String(error.message || '').toLowerCase();
+  return (
+    message.includes('getaddrinfo enotfound') ||
+    message.includes('could not translate host name') ||
+    message.includes('timeout') ||
+    message.includes('connection terminated unexpectedly') ||
+    message.includes('the database system is starting up') ||
+    message.includes('control plane request failed')
+  );
+}
+
 async function initializeSchema() {
   if (initialized) return;
 
-  await pool.query(`
+  try {
+    await pool.query(`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
   `);
@@ -333,6 +353,14 @@ async function initializeSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_completed ON lesson_progress(completed) WHERE completed = true;');
 
   initialized = true;
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production' && isTransientDbError(error)) {
+      console.warn('[DB] Schema initialization skipped because the database is unavailable:', error.message);
+      return;
+    }
+
+    throw error;
+  }
 }
 
 module.exports = {
