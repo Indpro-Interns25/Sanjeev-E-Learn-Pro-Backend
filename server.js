@@ -139,12 +139,20 @@ app.get('/test', (req, res) => {
 
 // Import and use routes
 const routes = require('./routes');
-const { login, register, validateToken } = require('./controllers/authController');
+const {
+  login,
+  register,
+  instructorLogin,
+  instructorRegister,
+  validateToken
+} = require('./controllers/authController');
 const statsController = require('./controllers/statsController');
 
 // Add direct API routes that frontend expects
 app.post('/auth/login', login);
 app.post('/auth/register', register);
+app.post('/auth/instructor/login', instructorLogin);
+app.post('/auth/instructor/register', instructorRegister);
 app.get('/auth/me', validateToken, (req, res) => {
   res.status(200).json({
     message: 'User profile retrieved successfully',
@@ -173,6 +181,8 @@ app.get('/stats', statsController.getPublicStats);
 // Additional direct routes for compatibility
 app.post('/api/login', login);
 app.post('/api/register', register);
+app.post('/api/auth/instructor/login', instructorLogin);
+app.post('/api/auth/instructor/register', instructorRegister);
 app.post('/login', login);
 app.post('/register', register);
 
@@ -200,6 +210,8 @@ app.use('*', (req, res) => {
       'GET /test',
       'POST /auth/login',
       'POST /auth/register',
+      'POST /auth/instructor/login',
+      'POST /auth/instructor/register',
       'GET /auth/me',
       'POST /auth/logout',
       'POST /auth/forgot-password',

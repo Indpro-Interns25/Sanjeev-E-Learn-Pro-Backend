@@ -7,6 +7,7 @@ const { validateToken, attachUserIfPresent } = require('../middleware/authMiddle
 const { allowRoles } = require('../middleware/rbacMiddleware');
 
 // Course CRUD operations
+router.get('/categories/list', attachUserIfPresent, courseController.listCategories);
 router.get('/', attachUserIfPresent, courseController.list);
 router.get('/:id', attachUserIfPresent, courseController.get);
 router.post('/', validateToken, allowRoles('admin', 'instructor'), courseController.create);

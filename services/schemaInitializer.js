@@ -352,6 +352,16 @@ async function initializeSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_user_lesson ON lesson_progress(user_id, lesson_id);');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_lesson_progress_completed ON lesson_progress(completed) WHERE completed = true;');
 
+  await pool.query(`
+    ALTER TABLE courses
+    ALTER COLUMN thumbnail TYPE TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE courses
+    ALTER COLUMN preview_video TYPE TEXT;
+  `);
+
   initialized = true;
   } catch (error) {
     if (process.env.NODE_ENV !== 'production' && isTransientDbError(error)) {

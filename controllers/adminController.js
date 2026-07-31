@@ -1,6 +1,7 @@
 const pool = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { formatDurationForDB, formatDurationForForm } = require('../utils/durationHelper');
+const { normalizeThumbnail } = require('../utils/thumbnail');
 
 // Helper to check whether a column exists on a table (used to support older DBs)
 async function columnExists(tableName, columnName) {
@@ -277,7 +278,7 @@ exports.createCourse = asyncHandler(async (req, res) => {
     level: normalizedLevel,
     duration: duration || '4 weeks',
     status: normalizedStatus,
-    thumbnail: thumbnail || null,
+    thumbnail: normalizeThumbnail(thumbnail),
     preview_video: preview_video || null,
     youtube_playlist_id: youtube_playlist_id ? String(youtube_playlist_id).trim() : null,
     is_free: true
@@ -375,7 +376,7 @@ exports.updateCourse = asyncHandler(async (req, res) => {
   }
   if (thumbnail !== undefined) {
     updates.push(`thumbnail = $${paramCount++}`);
-    values.push(thumbnail);
+    values.push(normalizeThumbnail(thumbnail));
   }
   if (preview_video !== undefined) {
     updates.push(`preview_video = $${paramCount++}`);

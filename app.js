@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
+const { initializeSchema } = require('./services/schemaInitializer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,8 +12,8 @@ const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL ||
   .filter(Boolean);
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Add request logging middleware BEFORE routes
 app.use((req, res, next) => {
@@ -48,6 +49,10 @@ app.get('/test', (req, res) => {
 // Routes
 const routes = require('./routes');
 const authRoutes = require('./routes/authRoutes');
+const {
+  instructorLogin,
+  instructorRegister
+} = require('./controllers/authController');
 
 // Root route - Welcome message
 app.get('/', (req, res) => {
@@ -62,6 +67,10 @@ app.get('/favicon.ico', (req, res) => {
 // Add direct auth routes (what frontend expects)
 app.use('/auth', authRoutes);
 
+// Production compatibility aliases used by the deployed frontend.
+app.post('/api/auth/instructor/login', instructorLogin);
+app.post('/api/auth/instructor/register', instructorRegister);
+
 app.use('/api', routes);
 
 // Catch-all route for undefined routes
@@ -73,7 +82,7 @@ app.use('*', (req, res) => {
     availableEndpoints: {
       root: '/',
       health: '/health',
-      auth: '/api/auth/login, /api/auth/register',
+      auth: '/api/auth/login, /api/auth/register, /api/auth/instructor/login, /api/auth/instructor/register',
       api: '/api'
     }
   });
@@ -81,14 +90,35 @@ app.use('*', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error occurred:', err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  console.error('Error occurred:', err.stack || err);
+
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request payload too large',
+      message: 'The uploaded thumbnail or course data is too large. Try a smaller image.',
+    });
+  }
+
+  const status = err.status || 500;
+  const message =
+    process.env.NODE_ENV === 'production' && status === 500
+      ? 'Something went wrong!'
+      : err.message || 'Something went wrong!';
+
+  res.status(status).json({ error: message });
 });
 
-const server = app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Server host binding ${HOST}:${PORT}`);
   console.log(`🚀 Server ready to accept connections!`);
+
+  try {
+    await initializeSchema();
+    console.log('Database schema initialized');
+  } catch (schemaError) {
+    console.error('Database schema initialization failed:', schemaError.message);
+  }
   
   // Test if server is actually listening
   const address = server.address();

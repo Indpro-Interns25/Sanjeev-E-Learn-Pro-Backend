@@ -1,6 +1,7 @@
 const Course = require('../models/courseModel');
 const asyncHandler = require('../utils/asyncHandler');
 const pool = require('../db');
+const { normalizeThumbnail } = require('../utils/thumbnail');
 
 function normalizeTags(tags) {
   if (!Array.isArray(tags)) return [];
@@ -9,25 +10,29 @@ function normalizeTags(tags) {
 
 async function syncCourseTags(courseId, tags) {
   const normalizedTags = normalizeTags(tags);
-
-  await pool.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
   if (normalizedTags.length === 0) return;
 
-  for (const tagName of normalizedTags) {
-    const upsertTag = await pool.query(
-      `INSERT INTO tags (name)
-       VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-      [tagName]
-    );
+  try {
+    await pool.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
 
-    await pool.query(
-      `INSERT INTO course_tags (course_id, tag_id)
-       VALUES ($1, $2)
-       ON CONFLICT (course_id, tag_id) DO NOTHING`,
-      [courseId, upsertTag.rows[0].id]
-    );
+    for (const tagName of normalizedTags) {
+      const upsertTag = await pool.query(
+        `INSERT INTO tags (name)
+         VALUES ($1)
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [tagName]
+      );
+
+      await pool.query(
+        `INSERT INTO course_tags (course_id, tag_id)
+         VALUES ($1, $2)
+         ON CONFLICT (course_id, tag_id) DO NOTHING`,
+        [courseId, upsertTag.rows[0].id]
+      );
+    }
+  } catch (error) {
+    console.warn(`Course tags sync skipped for course ${courseId}:`, error.message);
   }
 }
 
@@ -305,7 +310,7 @@ exports.create = asyncHandler(async (req, res) => {
     level: normalizedLevel,
     duration: duration || '4 weeks',
     status: normalizedStatus,
-    thumbnail: thumbnail || null,
+    thumbnail: normalizeThumbnail(thumbnail),
     preview_video: preview_video || null,
     youtube_playlist_id: youtube_playlist_id ? String(youtube_playlist_id).trim() : null,
     is_free: true
@@ -374,6 +379,8 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   // Use direct database query to handle all fields with COALESCE
+  const normalizedThumbnail = thumbnail !== undefined ? normalizeThumbnail(thumbnail) : null;
+
   let updated;
   try {
     updated = await pool.query(`
@@ -393,7 +400,7 @@ exports.update = asyncHandler(async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $12 
       RETURNING *`,
-      [title, description, category, level, duration, status, instructor_id, thumbnail, preview_video, is_featured, youtube_playlist_id, id]
+      [title, description, category, level, duration, status, instructor_id, normalizedThumbnail, preview_video, is_featured, youtube_playlist_id, id]
     );
   } catch (error) {
     if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
@@ -573,5 +580,62 @@ exports.getVideoProgress = asyncHandler(async (req, res) => {
       completedLectures,
       lectures: result.rows
     }
+  });
+});
+
+const DEFAULT_CATEGORIES = [
+  'Web Development',
+  'Mobile Development',
+  'Data Science',
+  'Machine Learning',
+  'Design',
+  'Business',
+  'Backend Development',
+  'Programming',
+  'DevOps',
+  'Cloud Computing',
+  'Security',
+  'Soft Skills',
+  'Career',
+  'Marketing',
+  'Language',
+];
+
+exports.listCategories = asyncHandler(async (req, res) => {
+  let categories = [];
+
+  try {
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'categories'
+      ) AS exists
+    `);
+
+    if (tableCheck.rows[0]?.exists) {
+      const result = await pool.query('SELECT name FROM categories ORDER BY name ASC');
+      categories = result.rows.map((row) => row.name).filter(Boolean);
+    }
+  } catch (error) {
+    console.warn('Category table lookup failed:', error.message);
+  }
+
+  if (categories.length === 0) {
+    const result = await pool.query(`
+      SELECT DISTINCT category AS name
+      FROM courses
+      WHERE category IS NOT NULL AND TRIM(category) <> ''
+      ORDER BY category ASC
+    `);
+    categories = result.rows.map((row) => row.name).filter(Boolean);
+  }
+
+  if (categories.length === 0) {
+    categories = DEFAULT_CATEGORIES;
+  }
+
+  res.json({
+    success: true,
+    data: categories.map((name) => ({ name })),
   });
 });
