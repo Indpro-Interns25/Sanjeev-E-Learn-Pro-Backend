@@ -107,7 +107,7 @@ exports.adminLogin = asyncHandler(async (req, res) => {
 
 // POST /api/auth/register
 exports.register = asyncHandler(async (req, res) => {
-  const { email, password, name, role: requestedRole } = req.body;
+  const { email, password, name } = req.body;
   
   try {
     // Input validation
@@ -148,16 +148,12 @@ exports.register = asyncHandler(async (req, res) => {
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    const allowedRoles = ['student', 'instructor'];
-    const normalizedRole = String(requestedRole || '').trim().toLowerCase();
-    const role = allowedRoles.includes(normalizedRole) ? normalizedRole : 'student';
-
     // Save user to database
     const userData = {
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       name: name.trim(),
-      role,
+      role: 'student',
       status: 'active',
       enrolledCourses: []
     };
