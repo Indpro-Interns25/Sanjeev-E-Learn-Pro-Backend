@@ -2,9 +2,24 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
+const pool = require('../db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+
+async function ensureInstructorProfilesTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS instructor_profiles (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      mobile_number VARCHAR(30) NOT NULL,
+      highest_qualification VARCHAR(255) NOT NULL,
+      years_of_experience INTEGER NOT NULL,
+      specialization VARCHAR(255) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
 
 // POST /api/auth/login
 exports.login = asyncHandler(async (req, res) => {
@@ -92,7 +107,7 @@ exports.adminLogin = asyncHandler(async (req, res) => {
 
 // POST /api/auth/register
 exports.register = asyncHandler(async (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, password, name, role: requestedRole } = req.body;
   
   try {
     // Input validation
@@ -133,12 +148,16 @@ exports.register = asyncHandler(async (req, res) => {
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+    const allowedRoles = ['student', 'instructor'];
+    const normalizedRole = String(requestedRole || '').trim().toLowerCase();
+    const role = allowedRoles.includes(normalizedRole) ? normalizedRole : 'student';
+
     // Save user to database
     const userData = {
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       name: name.trim(),
-      role: 'student',
+      role,
       status: 'active',
       enrolledCourses: []
     };
@@ -252,4 +271,164 @@ exports.forgotPassword = asyncHandler(async (req, res) => {
     success: true,
     message: 'If an account with that email exists, a password reset link has been sent.'
   });
+});
+
+// POST /api/auth/instructor/login
+exports.instructorLogin = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  const user = await User.findByEmail(String(email).toLowerCase().trim());
+  if (!user || user.role !== 'instructor') {
+    return res.status(401).json({ error: 'Invalid instructor credentials' });
+  }
+
+  if (user.status === 'blocked') {
+    return res.status(403).json({ error: 'Account is blocked' });
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+  if (!isPasswordValid) {
+    return res.status(401).json({ error: 'Invalid instructor credentials' });
+  }
+
+  const payload = { id: user.id, email: user.email, role: user.role };
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+  return res.status(200).json({
+    message: 'Instructor login successful',
+    user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    token
+  });
+});
+
+// POST /api/auth/instructor/register
+exports.instructorRegister = asyncHandler(async (req, res) => {
+  const {
+    name,
+    email,
+    password,
+    mobileNumber,
+    highestQualification,
+    yearsOfExperience,
+    specialization,
+    acceptTerms
+  } = req.body;
+
+  if (
+    !name ||
+    !email ||
+    !password ||
+    !mobileNumber ||
+    !highestQualification ||
+    yearsOfExperience === undefined ||
+    yearsOfExperience === null ||
+    !specialization
+  ) {
+    return res.status(400).json({
+      error: 'All required instructor fields must be provided'
+    });
+  }
+
+  if (!acceptTerms) {
+    return res.status(400).json({
+      error: 'You must accept the Terms & Conditions'
+    });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  const mobileRegex = /^[0-9+\-()\s]{8,20}$/;
+  if (!mobileRegex.test(String(mobileNumber).trim())) {
+    return res.status(400).json({ error: 'Invalid mobile number format' });
+  }
+
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  const experience = Number(yearsOfExperience);
+  if (!Number.isInteger(experience) || experience < 0 || experience > 60) {
+    return res.status(400).json({ error: 'Years of experience must be a whole number between 0 and 60' });
+  }
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const existingUser = await User.findByEmail(normalizedEmail);
+  if (existingUser) {
+    return res.status(409).json({
+      error: 'Email already registered',
+      message: 'An account with this email already exists'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureInstructorProfilesTable(client);
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const newUserResult = await client.query(
+      `INSERT INTO users (email, name, password, role, status, enrolled_courses, created_at)
+       VALUES ($1, $2, $3, 'instructor', 'active', '{}'::integer[], CURRENT_TIMESTAMP)
+       RETURNING id, email, name, role, status, created_at`,
+      [normalizedEmail, String(name).trim(), hashedPassword]
+    );
+
+    const createdUser = newUserResult.rows[0];
+
+    await client.query(
+      `INSERT INTO instructor_profiles
+       (user_id, mobile_number, highest_qualification, years_of_experience, specialization)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id)
+       DO UPDATE SET
+         mobile_number = EXCLUDED.mobile_number,
+         highest_qualification = EXCLUDED.highest_qualification,
+         years_of_experience = EXCLUDED.years_of_experience,
+         specialization = EXCLUDED.specialization,
+         updated_at = NOW()`,
+      [
+        createdUser.id,
+        String(mobileNumber).trim(),
+        String(highestQualification).trim(),
+        experience,
+        String(specialization).trim()
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    const payload = {
+      id: createdUser.id,
+      email: createdUser.email,
+      role: createdUser.role,
+      status: createdUser.status
+    };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+    return res.status(201).json({
+      message: 'Instructor registered successfully',
+      user: createdUser,
+      token
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Email already registered',
+        message: 'An account with this email already exists'
+      });
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
 });

@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { login, register, adminLogin, getMe, forgotPassword } = require('../controllers/authController');
+const {
+  login,
+  register,
+  adminLogin,
+  instructorLogin,
+  instructorRegister,
+  getMe,
+  forgotPassword
+} = require('../controllers/authController');
 const { validateToken } = require('../middleware/authMiddleware');
 const pool = require('../db');
 
@@ -49,8 +57,14 @@ router.post('/login', login);
 // POST /api/auth/admin/login
 router.post('/admin/login', adminLogin);
 
+// POST /api/auth/instructor/login
+router.post('/instructor/login', instructorLogin);
+
 // POST /api/auth/register
 router.post('/register', register);
+
+// POST /api/auth/instructor/register
+router.post('/instructor/register', instructorRegister);
 
 // GET /api/auth/validate (to check if token is valid)
 router.get('/validate', validateToken, (req, res) => {
