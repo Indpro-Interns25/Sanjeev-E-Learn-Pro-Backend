@@ -159,15 +159,59 @@ exports.create = asyncHandler(async (req, res) => {
   // Normalize duration to consistent format
   const normalizedDuration = formatDurationForDB(duration);
 
-  // Store video_url and duration and status in content or separate columns are not present in model;
-  // append video URL metadata to content to preserve data if needed
-  let contentToSave = finalContent;
-  if (video_url) contentToSave += `\n\nVideo: ${video_url}`;
-  if (normalizedDuration) contentToSave += `\n\nDuration: ${normalizedDuration}`;
-  if (status) contentToSave += `\n\nStatus: ${status}`;
+  // Check which optional columns exist before inserting
+  let lessonCols;
+  try {
+    const colCheck = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'lessons'
+       AND column_name = ANY($1::text[])`,
+      [['video_url', 'duration', 'order_number', 'updated_at']]
+    );
+    lessonCols = new Set(colCheck.rows.map(r => r.column_name));
+  } catch (e) {
+    lessonCols = new Set(['video_url']);
+  }
 
-  const created = await Lesson.create({ course_id, title, content: contentToSave, position });
-  res.status(201).json(created);
+  // Build dynamic INSERT
+  const colNames = ['course_id', 'title', 'content', 'order_index'];
+  const colVals = [course_id, title, finalContent, position || 0];
+
+  if (lessonCols.has('order_number')) {
+    colNames.push('order_number');
+    colVals.push(position || 0);
+  }
+  if (lessonCols.has('video_url') && video_url) {
+    colNames.push('video_url');
+    colVals.push(video_url);
+  }
+  if (lessonCols.has('duration') && normalizedDuration) {
+    colNames.push('duration');
+    colVals.push(normalizedDuration);
+  }
+
+  const placeholders = colVals.map((_, i) => `$${i + 1}`).join(', ');
+  const insertSql = `INSERT INTO lessons (${colNames.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+
+  let created;
+  try {
+    const result = await pool.query(insertSql, colVals);
+    created = result.rows[0];
+  } catch (insertErr) {
+    console.error('[createLesson] INSERT error:', insertErr.message);
+    // Fallback: simple insert without optional columns
+    const result = await pool.query(
+      'INSERT INTO lessons (course_id, title, content, order_index) VALUES ($1, $2, $3, $4) RETURNING *',
+      [course_id, title, finalContent, position || 0]
+    );
+    created = result.rows[0];
+  }
+
+  res.status(201).json({
+    ...created,
+    duration_number: formatDurationForForm(created.duration),
+    duration_display: created.duration
+  });
 });
 
 exports.getLessonById = asyncHandler(async (req, res) => {

@@ -378,31 +378,60 @@ exports.update = asyncHandler(async (req, res) => {
     }
   }
 
-  // Use direct database query to handle all fields with COALESCE
-  const normalizedThumbnail = thumbnail !== undefined ? normalizeThumbnail(thumbnail) : null;
+  const normalizedThumbnail = thumbnail !== undefined ? normalizeThumbnail(thumbnail) : undefined;
+
+  // Check which optional columns exist in the courses table to avoid referencing missing columns
+  let courseColsSet;
+  try {
+    const colCheck = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'courses'
+       AND column_name = ANY($1::text[])`,
+      [['is_featured', 'youtube_playlist_id', 'updated_at', 'preview_video', 'is_free']]
+    );
+    courseColsSet = new Set(colCheck.rows.map(r => r.column_name));
+  } catch (e) {
+    console.error('[updateCourse] colCheck failed:', e.message);
+    courseColsSet = new Set();
+  }
+
+  // Build SET clause dynamically - only include fields that are provided and columns that exist
+  const setClauses = [];
+  const params = [];
+
+  const addField = (col, value) => {
+    setClauses.push(`${col} = $${params.length + 1}`);
+    params.push(value);
+  };
+
+  if (title !== undefined) addField('title', title);
+  if (description !== undefined) addField('description', description);
+  if (category !== undefined) addField('category', category);
+  if (level !== undefined) addField('level', level.toLowerCase());
+  if (duration !== undefined) addField('duration', duration);
+  if (status !== undefined) addField('status', status.toLowerCase());
+  if (req.user.role === 'admin' && instructor_id !== undefined) addField('instructor_id', instructor_id);
+  if (normalizedThumbnail !== undefined) addField('thumbnail', normalizedThumbnail);
+  if (courseColsSet.has('preview_video') && preview_video !== undefined) addField('preview_video', preview_video);
+  if (courseColsSet.has('is_featured') && is_featured !== undefined) addField('is_featured', is_featured);
+  if (courseColsSet.has('youtube_playlist_id') && youtube_playlist_id !== undefined) addField('youtube_playlist_id', youtube_playlist_id || null);
+  if (courseColsSet.has('is_free')) addField('is_free', true);
+  if (courseColsSet.has('updated_at')) setClauses.push('updated_at = CURRENT_TIMESTAMP');
+
+  if (setClauses.length === 0) {
+    // Nothing to update, return existing
+    const [payload] = await attachTags([existing]);
+    return res.json(normalizeCoursePricing(payload));
+  }
+
+  params.push(id);
+  const sql = `UPDATE courses SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING *`;
 
   let updated;
   try {
-    updated = await pool.query(`
-      UPDATE courses SET 
-        title = COALESCE($1, title),
-        description = COALESCE($2, description),
-        category = COALESCE($3, category),
-        level = COALESCE($4, level),
-        duration = COALESCE($5, duration),
-        status = COALESCE($6, status),
-        instructor_id = COALESCE($7, instructor_id),
-        thumbnail = COALESCE($8, thumbnail),
-        preview_video = COALESCE($9, preview_video),
-        is_featured = COALESCE($10, is_featured),
-        youtube_playlist_id = COALESCE($11, youtube_playlist_id),
-        is_free = true,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $12 
-      RETURNING *`,
-      [title, description, category, level, duration, status, instructor_id, normalizedThumbnail, preview_video, is_featured, youtube_playlist_id, id]
-    );
+    updated = await pool.query(sql, params);
   } catch (error) {
+    console.error('[updateCourse] SQL error:', error.message, '| SQL:', sql);
     if (error.code === '23505' && String(error.constraint || '').includes('idx_courses_unique_youtube_playlist_id')) {
       return res.status(409).json({ error: 'youtube_playlist_id must be unique per course' });
     }

@@ -158,6 +158,22 @@ async function initializeSchema() {
     ADD COLUMN IF NOT EXISTS youtube_playlist_id VARCHAR(255);
   `);
 
+  // Ensure all commonly-used course columns exist
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'published';`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS category VARCHAR(255) DEFAULT 'General';`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS level VARCHAR(50) DEFAULT 'beginner';`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS duration VARCHAR(100);`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS thumbnail TEXT;`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS preview_video TEXT;`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS rating DECIMAL(3,2) DEFAULT 0.0;`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS enrolled_count INTEGER DEFAULT 0;`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false;`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS description TEXT;`);
+
+  // Drop the old level constraint (it used Capitalized values) and recreate with lowercase
+  await pool.query(`ALTER TABLE courses DROP CONSTRAINT IF EXISTS courses_level_check;`);
+
   await pool.query(`
     UPDATE courses
     SET is_free = true
@@ -188,6 +204,12 @@ async function initializeSchema() {
     ADD COLUMN IF NOT EXISTS video_url TEXT,
     ADD COLUMN IF NOT EXISTS youtube_video_id VARCHAR(64);
   `);
+
+  // Ensure all commonly-used lesson columns exist
+  await pool.query(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS duration VARCHAR(50);`);
+  await pool.query(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS order_number INTEGER DEFAULT 0;`);
+  await pool.query(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS video_assets (

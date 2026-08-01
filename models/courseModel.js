@@ -16,14 +16,25 @@ class CourseModel {
       is_free
     } = courseData;
     
-    const { rows } = await pool.query(
-      `INSERT INTO courses 
-       (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, is_free) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
-       RETURNING *`,
-      [title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id || null, true]
-    );
-    return rows[0];
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO courses 
+         (title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id, is_free) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+         RETURNING *`,
+        [title, description, instructor_id, category, level, duration, status, thumbnail, preview_video, youtube_playlist_id || null, true]
+      );
+      return rows[0];
+    } catch (err) {
+      // If optional columns don't exist, do a minimal insert
+      console.warn('[courseModel.create] Full insert failed, trying minimal insert:', err.message);
+      const { rows } = await pool.query(
+        `INSERT INTO courses (title, description, instructor_id, category, level, duration, status, thumbnail)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [title, description, instructor_id, category || 'General', level || 'beginner', duration || '4 weeks', status || 'published', thumbnail || null]
+      );
+      return rows[0];
+    }
   }
   static async findById(id) {
     const { rows } = await pool.query('SELECT * FROM courses WHERE id=$1', [id]);
