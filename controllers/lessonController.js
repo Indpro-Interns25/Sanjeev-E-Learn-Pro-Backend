@@ -135,10 +135,13 @@ exports.create = asyncHandler(async (req, res) => {
     description, // map to content
     content,
     video_url,
+    videoUrl,
     order_sequence,
     duration,
     status
   } = req.body;
+
+  const effectiveVideoUrl = video_url || videoUrl || '';
 
   if (!title) return res.status(400).json({ error: 'title required' });
   if (!course_id || isNaN(course_id)) return res.status(400).json({ error: 'course_id is required and must be numeric' });
@@ -181,9 +184,9 @@ exports.create = asyncHandler(async (req, res) => {
     colNames.push('order_number');
     colVals.push(position || 0);
   }
-  if (lessonCols.has('video_url') && video_url) {
+  if (lessonCols.has('video_url') && effectiveVideoUrl) {
     colNames.push('video_url');
-    colVals.push(video_url);
+    colVals.push(effectiveVideoUrl);
   }
   if (lessonCols.has('duration') && normalizedDuration) {
     colNames.push('duration');
@@ -238,7 +241,8 @@ exports.getLessonById = asyncHandler(async (req, res) => {
 exports.updateLesson = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   // Accept both 'position' and 'order_sequence' from frontend
-  const { title, content, description, video_url, duration, course_id } = req.body;
+  const { title, content, description, video_url, videoUrl, duration, course_id } = req.body;
+  const effectiveVideoUrl = video_url !== undefined ? video_url : (videoUrl !== undefined ? videoUrl : undefined);
   const position = req.body.order_sequence !== undefined ? req.body.order_sequence : req.body.position;
   
   // Use content if provided, otherwise use description
@@ -257,7 +261,7 @@ exports.updateLesson = asyncHandler(async (req, res) => {
   const pool = require('../db');
   const updated = await pool.query(
     'UPDATE lessons SET title = COALESCE($1, title), content = COALESCE($2, content), order_index = COALESCE($3, order_index), order_number = COALESCE($3, order_number), video_url = COALESCE($4, video_url), duration = COALESCE($5, duration), course_id = COALESCE($6, course_id), updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
-    [title, finalContent, position, video_url, normalizedDuration, course_id, id]
+    [title, finalContent, position, effectiveVideoUrl, normalizedDuration, course_id, id]
   );
 
   if (updated.rows.length === 0) {
