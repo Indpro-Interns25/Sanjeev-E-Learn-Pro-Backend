@@ -46,6 +46,12 @@ exports.login = asyncHandler(async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
+  if (user.role !== 'student') {
+    return res.status(403).json({
+      error: 'Student account is required. Please use the correct login page.'
+    });
+  }
+
   // Generate token
   const payload = { id: user.id, email: user.email, role: user.role };
   const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
