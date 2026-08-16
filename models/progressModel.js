@@ -44,6 +44,12 @@ const Progress = {
          l.order_index,
          COALESCE(up.completed, false) as completed,
          COALESCE(up.watched_time, 0) as watched_time,
+         COALESCE(up.total_duration, 0) as total_duration,
+         CASE
+           WHEN COALESCE(up.total_duration, 0) > 0 THEN LEAST(100, ROUND((COALESCE(up.watched_time, 0)::decimal / up.total_duration) * 100)::int)
+           WHEN COALESCE(up.completed, false) = true THEN 100
+           ELSE 0
+         END as progress_percentage,
          up.completed_at,
          up.updated_at
        FROM lessons l
@@ -62,7 +68,14 @@ const Progress = {
     const { rows } = await pool.query(
       `SELECT
          COUNT(*)::int as total_lectures,
-         SUM(CASE WHEN up.completed = true THEN 1 ELSE 0 END)::int as completed_lectures
+         SUM(CASE WHEN up.completed = true THEN 1 ELSE 0 END)::int as completed_lectures,
+         AVG(
+           CASE
+             WHEN COALESCE(up.total_duration, 0) > 0 THEN LEAST(100, (COALESCE(up.watched_time, 0)::decimal / up.total_duration) * 100)
+             WHEN COALESCE(up.completed, false) = true THEN 100
+             ELSE 0
+           END
+         ) as watched_progress
        FROM lessons l
        LEFT JOIN user_progress up ON l.id = up.lecture_id AND up.user_id = $1
        WHERE l.course_id = $2`,
@@ -72,7 +85,7 @@ const Progress = {
     const result = rows[0];
     const totalLectures = result.total_lectures || 0;
     const completedLectures = result.completed_lectures || 0;
-    const progress = totalLectures > 0 ? Math.round((completedLectures / totalLectures) * 100) : 0;
+    const progress = totalLectures > 0 ? Math.round(Number(result.watched_progress) || 0) : 0;
 
     return {
       progress,

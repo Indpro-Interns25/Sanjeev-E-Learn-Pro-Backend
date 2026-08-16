@@ -188,16 +188,28 @@ exports.streamLessonVideo = asyncHandler(async (req, res) => {
 // Body: { lecture_id, user_id, current_time, duration, progress_percentage }
 exports.saveVideoProgress = asyncHandler(async (req, res) => {
   const { lecture_id, user_id, current_time, duration, progress_percentage } = req.body;
+  const lectureId = Number.parseInt(lecture_id, 10);
+  const userId = Number.parseInt(user_id, 10);
+  const currentTime = Math.max(0, Math.floor(Number(current_time) || 0));
+  const totalDuration = Math.max(0, Math.floor(Number(duration) || 0));
+  const progressPercentage = totalDuration > 0
+    ? Math.min(100, Math.round((currentTime / totalDuration) * 100))
+    : Math.min(100, Math.max(0, Math.round(Number(progress_percentage) || 0)));
 
-  if (!lecture_id || !user_id || current_time === undefined) {
+  if (!lectureId || !userId || current_time === undefined) {
     return res.status(400).json({
       success: false,
       message: 'lecture_id, user_id, and current_time are required'
     });
   }
 
+  const isPrivileged = req.user.role === 'admin' || req.user.role === 'instructor';
+  if (!isPrivileged && req.user.id !== userId) {
+    return res.status(403).json({ success: false, message: 'Forbidden: cannot save progress for another user' });
+  }
+
   // Verify lecture exists
-  const lesson = await pool.query('SELECT id, course_id FROM lessons WHERE id = $1', [lecture_id]);
+  const lesson = await pool.query('SELECT id, course_id FROM lessons WHERE id = $1', [lectureId]);
   if (lesson.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Lesson not found' });
   }
@@ -205,11 +217,10 @@ exports.saveVideoProgress = asyncHandler(async (req, res) => {
   const courseId = lesson.rows[0].course_id;
 
   // Verify user is enrolled in the course or is admin/instructor
-  const isPrivileged = req.user.role === 'admin' || req.user.role === 'instructor';
   if (!isPrivileged) {
     const enrollment = await pool.query(
       'SELECT 1 FROM enrollments WHERE user_id = $1 AND course_id = $2 AND is_active = true',
-      [user_id, courseId]
+      [userId, courseId]
     );
     if (enrollment.rows.length === 0) {
       return res.status(403).json({ success: false, message: 'Forbidden: not enrolled in this course' });
@@ -218,12 +229,23 @@ exports.saveVideoProgress = asyncHandler(async (req, res) => {
 
   // Save or update video progress
   const result = await pool.query(
-    `INSERT INTO user_progress (user_id, lesson_id, course_id, watched_time, total_duration)
+    `INSERT INTO user_progress (user_id, lecture_id, course_id, watched_time, total_duration)
      VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (user_id, lesson_id) 
-     DO UPDATE SET watched_time = $4, total_duration = $5, updated_at = CURRENT_TIMESTAMP
-     RETURNING *`,
-    [user_id, lecture_id, courseId, current_time || 0, duration || 0]
+     ON CONFLICT (user_id, lecture_id)
+     DO UPDATE SET
+       course_id = EXCLUDED.course_id,
+       watched_time = GREATEST(user_progress.watched_time, EXCLUDED.watched_time),
+       total_duration = GREATEST(COALESCE(user_progress.total_duration, 0), EXCLUDED.total_duration),
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING *,
+       lecture_id AS lesson_id,
+       watched_time AS current_time,
+       total_duration AS duration,
+       CASE
+         WHEN COALESCE(total_duration, 0) > 0 THEN LEAST(100, ROUND((watched_time::decimal / total_duration) * 100)::int)
+         ELSE $6
+       END AS progress_percentage`,
+    [userId, lectureId, courseId, currentTime, totalDuration, progressPercentage]
   );
 
   res.json({
@@ -262,9 +284,23 @@ exports.getVideoProgress = asyncHandler(async (req, res) => {
 
   // Get video progress
   const result = await pool.query(
-    `SELECT user_id, lesson_id, watched_time, total_duration, completed, created_at, updated_at
+    `SELECT
+       user_id,
+       lecture_id,
+       lecture_id AS lesson_id,
+       watched_time,
+       watched_time AS current_time,
+       total_duration,
+       total_duration AS duration,
+       CASE
+         WHEN COALESCE(total_duration, 0) > 0 THEN LEAST(100, ROUND((watched_time::decimal / total_duration) * 100)::int)
+         ELSE 0
+       END AS progress_percentage,
+       completed,
+       created_at,
+       updated_at
      FROM user_progress
-     WHERE lesson_id = $1 AND user_id = $2`,
+     WHERE lecture_id = $1 AND user_id = $2`,
     [lectureId, userId]
   );
 
@@ -273,9 +309,13 @@ exports.getVideoProgress = asyncHandler(async (req, res) => {
       success: true,
       data: {
         user_id: userId,
+        lecture_id: lectureId,
         lesson_id: lectureId,
         watched_time: 0,
+        current_time: 0,
         total_duration: 0,
+        duration: 0,
+        progress_percentage: 0,
         completed: false
       }
     });

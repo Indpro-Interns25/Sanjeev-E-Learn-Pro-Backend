@@ -23,6 +23,7 @@ async function createUserProgressTable() {
         lecture_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
         completed BOOLEAN NOT NULL DEFAULT false,
         watched_time INTEGER NOT NULL DEFAULT 0,
+        total_duration INTEGER NOT NULL DEFAULT 0,
         completed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

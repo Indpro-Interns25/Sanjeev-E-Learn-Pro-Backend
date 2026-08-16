@@ -78,7 +78,9 @@ async function initializeSchema() {
       lecture_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
       completed BOOLEAN NOT NULL DEFAULT false,
       watched_time INTEGER NOT NULL DEFAULT 0,
+      total_duration INTEGER NOT NULL DEFAULT 0,
       completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (user_id, lecture_id)
     );
@@ -196,7 +198,9 @@ async function initializeSchema() {
     ALTER TABLE user_progress
     ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     ADD COLUMN IF NOT EXISTS course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
-    ADD COLUMN IF NOT EXISTS lecture_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE;
+    ADD COLUMN IF NOT EXISTS lecture_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS total_duration INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `);
 
   await pool.query(`
